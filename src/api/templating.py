@@ -1,6 +1,6 @@
 """Plantillas Jinja: filtros, variables globales y render() con el mensaje flash."""
 
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from fastapi import Request
@@ -27,7 +27,23 @@ def format_slot(context, dt: datetime) -> str:
     return f"{WEEKDAYS[local.weekday()]} {local.day} {MONTHS[local.month - 1]} · {local:%H:%M}"
 
 
+def weekday_short(d: date) -> str:
+    return WEEKDAYS[d.weekday()]
+
+
+def day_month(d: date) -> str:
+    return f"{d.day} {MONTHS[d.month - 1]}"
+
+
+def activity_label(activity: str) -> str:
+    """«Nado libre · Calle central» → «Calle central»; si no hay subtítulo, el nombre tal cual."""
+    return activity.split(" · ", 1)[-1]
+
+
 templates.env.filters["slot"] = format_slot
+templates.env.filters["activity"] = activity_label
+templates.env.filters["weekday"] = weekday_short
+templates.env.filters["day_month"] = day_month
 templates.env.globals.update(
     SERVICES=jobs_repo.SERVICES,
     MODES=jobs_repo.MODES,

@@ -9,14 +9,13 @@ MADRID = ZoneInfo("Europe/Madrid")
 
 def future_form(**overrides) -> BookingForm:
     day = (datetime.now(MADRID) + timedelta(days=2)).date().isoformat()
-    data = {"center": "  La Chopera ", "slot_date": day, "slot_time": "19:00"} | overrides
+    data = {"slot_date": day, "slot_time": "19:00"} | overrides
     return BookingForm(**data)
 
 
 def test_valid_booking_form():
     form = future_form()
     assert form.validate(MADRID) is None
-    assert form.center == "La Chopera"
 
 
 def test_slot_keeps_madrid_wall_clock_time():
@@ -31,8 +30,7 @@ def test_invalid_date_or_time():
     assert future_form(slot_date="").validate(MADRID) == "Fecha u hora no válidas."
 
 
-def test_unknown_service_or_mode():
-    assert future_form(service="padel").validate(MADRID) == "Elige un servicio."
+def test_unknown_mode():
     assert future_form(mode="otro").validate(MADRID) == "Elige reservar u observar."
 
 

@@ -1,7 +1,9 @@
 """Probar la conexión de un perfil con el portal y guardar el resultado."""
 
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TypeVar
 
 from src import portal
 from src.config import Settings
@@ -41,3 +43,17 @@ def check_connection(conn: sqlite3.Connection, settings: Settings, profile_id: i
     profiles_repo.set_portal_status(conn, profile_id, check.status, check.message)
     conn.commit()
     return check
+
+
+T = TypeVar("T")
+
+
+def with_session(conn: sqlite3.Connection, settings: Settings, profile_id: int, action: Callable[[], T]) -> T:
+    """Ejecuta una lectura del portal; si la sesión caducó, inicia sesión UNA vez y la repite UNA vez."""
+    try:
+        return action()
+    except portal.SessionExpired:
+        check = check_connection(conn, settings, profile_id)
+        if not check.ok:
+            raise portal.PortalError(check.message) from None
+        return action()

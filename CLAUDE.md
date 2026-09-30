@@ -8,8 +8,10 @@ Contexto para Claude Code. Léelo entero antes de tocar código. Si algo de aqu�
 |---|---|
 | 1. Repo, entorno, `.gitignore`, estructura | ✅ hecho |
 | 2. Front básico: cuenta de casa, perfiles, reservar, mis reservas (sin portal) | ✅ hecho (rama `feat/front-perfiles`) |
-| 3. Login por CLI con Playwright | 🔶 hecho, falta probarlo con una cuenta real |
-| 4. Listar turnos / polideportivos | ⏳ siguiente: necesita capturas de las páginas con sesión |
+| 3. Login por CLI con Playwright | ✅ probado con cuenta real |
+| 4a. Lista de polideportivos por servicio + favoritos | ✅ probado con cuenta real |
+| 4b. Turnos de la semana con plazas libres | ✅ probado con cuenta real |
+| 5–8. Reserva en la apertura, reintentos, monedero, vigilancia y avisos con botón «Observar» | ✅ compra real verificada el 30/09 (y anulada); falta probar una apertura real con compra |
 | 5–11 | pendiente |
 
 ## 1. Qué es y para qué
@@ -110,10 +112,78 @@ Esto es lo observado hasta ahora. Se irá ampliando; marca como **verificado** l
 - Existe un panel de verificación de login (`uLoginVerification`); no sabemos cuándo se activa. Vigilarlo, sobre todo al entrar desde un dispositivo nuevo (la Pi).
 - Tras un login fallido no reintentar en bucle: parar y avisar, para no bloquear la cuenta.
 
-### Sala multitrabajo
+### Home con sesión (verificado 2026-09-30)
 
-- Página de alta: `/DeportesWeb/Modulos/VentaServicios/Eventos/AltaEventos?token=...`.
-- El `token` va en la query y probablemente cambia por sesión o navegación. No guardarlo fijo: llegar a la página navegando y leer el enlace.
+- La sesión guardada (`storage_state`) sigue valiendo entre ejecuciones; con sesión no aparece el enlace `IniciarSesion`.
+- Sección "Entradas de uso libre" con tarjetas `article` + `h4[title]` que navegan por JavaScript (sin `href`): "Sala multitrabajo", "Nado libre en piscina cubierta", "Oferta de entradas por uso y centro", "Vaso de enseñanza", etc.
+
+### Lista de polideportivos de un servicio (verificado 2026-09-30)
+
+- Ambos servicios llevan a `/DeportesWeb/Modulos/VentaServicios/Eventos/AltaEventos?token=...`. El `token` cambia en cada navegación: no guardarlo, llegar pulsando la tarjeta.
+- Los centros cargan después de `networkidle` (postback parcial): esperar a `#ContentFixedSection_uAltaEventos_uCentrosSeleccionar_divCentros article`.
+- Cada tarjeta: `h4[title]` = nombre, `.navigation-section-widget-collection-item-description[title]` = dirección, `span#…_spnFavorite_<id>` con texto `favorite` / `favorite_border`.
+- `<id>` es el `facility_code` del centro y es el mismo en todos los servicios. Sala multitrabajo: 43 centros; nado libre: 36 (13 solo sala, 6 solo piscina).
+- **Favoritos del portal = de la cuenta** (no del servicio; son los mismos que en Madrid Móvil). Se ponen/quitan con postbacks `SetFavorite` / `UnsetFavorite` con `facility_code`. La app **no** escribe favoritos en el portal: los lee al actualizar y los suma a los del perfil.
+- Hay un interruptor "Mostrar centros con disponibilidad" (con fecha) y un buscador.
+- Elegir un centro lanza el postback `SelectFacility` (`menu_code`, fecha opcional).
+
+### Turnos de un centro (verificado 2026-09-30)
+
+- Tras pulsar el centro: cabecera con nombre/dirección, calendario mensual `#ContentFixedSection_uAltaEventos_uAltaEventosFechas_datetimepicker` (celdas `td[data-day='dd/mm/aaaa']`, hoy con clase `active`) y, por actividad, un bloque con `h4.media-heading` (p. ej. "SALA MUSCULACION", "Nado libre"), la duración (sala: 90´) y `ul.media-list` de turnos.
+- Cada turno: `li.media` con `h4` = hora y dos `span`: **plazas libres** y `/aforo`. Tachado (`<strike>`) si no se puede elegir; los elegibles tienen `<a href="#">`.
+- Cambiar de día: pulsar la celda; el UpdatePanel sustituye la lista (esperar a que la anterior se desconecte del DOM). 7 días en una visita ≈ 10 s.
+- El calendario deja pulsar días de más de 49 h: salen con libres = aforo porque **aún no han abierto**. Observado: con hora actual 30/09 15:36, el 02/10 tenía reservas hasta las 16:30 y aforo completo desde las 17:00 → apertura = inicio − 49 h (coincide con madrid.es).
+- El horario cambia según el día (sábados otro horario) y el aforo según el turno (8–20).
+- **Varias actividades por centro con el mismo título:** en piscina hay un bloque por calle. Cada `ul.media-list` va precedido de su `div.media` con `h4` ("Nado libre") y un primer `<p>` con la calle ("Calle central", "Calle CON BORDILLO", "Calle lateral"…; varía por centro). En sala el primer `<p>` es la edad. La app guarda la actividad como "Nado libre · Calle central" y un turno se identifica por día + hora + actividad.
+- Estados en la app (`src/core/slots.py`): libre, completo (→ Observar primero), sin_abrir (→ "abre el … a las …"), pasado.
+- Siguiente paso a estudiar: qué pasa al pulsar un turno elegible (pantallas hasta la confirmación, pago/monedero).
+
+### Carrito y pago (visto 2026-09-30, sin confirmar nada)
+
+- **Pulsar la hora de un turno elegible lo mete en el carrito** y lleva a `/DeportesWeb/Modulos/VentaServicios/CarritoConfirmar`. No es solo seleccionar.
+- La página muestra el turno (actividad, fecha, sala, inicio–fin), precio con descuentos (p. ej. 5,00 € − 20 % EDAD JOVEN = 4,00 €) y total.
+- Formas de pago: radios `name="ContentFixedSection_uCarritoConfirmar_payment_method_filter"` **sin ninguno marcado**, en este orden: Tarjeta bancaria, Bizum, Monedero (con "Saldo disponible X,XX €"). Contenedor `#ContentFixedSection_uCarritoConfirmar_divPaymentMethods`.
+- Datos del justificante (nombre, apellidos, correo) vienen rellenos y deshabilitados.
+- Botones: "Eliminar el carrito", "Confirmar la compra", "Seguir comprando".
+- **Regla acordada:** el bot solo paga con Monedero. Si no aparece o el saldo < total → error y aviso; nunca tarjeta ni Bizum.
+- El carrito **caduca solo** (el de la exploración ya no estaba ~40 min después). El bot nunca pulsa "Eliminar el carrito" (la usuaria pidió no tocarlo): si no confirma, el turno se queda ahí hasta que caduque.
+- Sin ver todavía: qué pasa tras "Confirmar la compra" (justificante/QR).
+
+### Mis reservas y anulación (verificado 2026-09-30 con una anulación real)
+
+- *Mi cuenta* (`/DeportesWeb/Account`, desde el enlace del correo en la cabecera, postback `MiCuenta`) → tarjeta «Entradas de uso libre» → `/DeportesWeb/Modulos/Eventos/Reservas?token=…`: tabla paginada (10 por página) con estado (vacío, «Pendiente», «Anulado», «Asistido»), fecha, día, horas, actividad, sala, centro e importe.
+- Cada fila: botón `button[title='Consultar']` (clase `hidden-lg`: se pulsa por JS) → ficha con resumen, «Monedero Pago X €», «Operación N» y botón `#ContentSection_uReservas_uCarritosFicha_btnRefundCart` «Anular» → ventana «¿Seguro que quieres anular el carrito?» con `…uWarningModal_btnYes` «Sí» (hay dos con el mismo id: usar `:visible`).
+- Anular una reserva hecha 2 min antes: permitido, y el importe **vuelve al monedero** al momento (*Mi cuenta → Movimientos monedero*: columnas Fecha, Hora (**en UTC**), Concepto, Importe, Saldo).
+- Plazos de anulación en otros casos (24 h / 2 h / 10 min) siguen sin verificar. El bot todavía no anula.
+
+### Avisos por Telegram
+
+- Un bot para toda la casa (`TELEGRAM_BOT_TOKEN`); cada perfil vincula su chat desde Perfil → "Vincular Telegram": código de un solo uso (15 min) en `t.me/<bot>?start=<código>`, la web lee los `/start` con `getUpdates` (sin webhook: no hay acceso desde internet) y guarda `telegram_chat_id` en el perfil.
+- `src.notify.notify(conn, settings, profile_id, texto)` nunca lanza y nunca debe llevar datos sensibles.
+
+### Reserva (src/core/booking.py + src/portal/booking.py)
+
+- El programador (`src/worker/scheduler.py`, hilo dentro de la web) lanza cada reserva **60 s antes de la apertura** T = inicio − 49 h (o ya, si está abierta): sesión/login y página del centro y día abiertas en ~4 s.
+- Mide el desfase del reloj del portal (cabecera `Date`, ±0,5 s; observado **+0,9 s**) y pulsa cuando en el reloj del portal ya son las T (límite inferior del desfase; nunca antes).
+- **Carga en la apertura (observado 30/09 17:00):** una recarga de la lista tardó 28 s y en ese tiempo se ocuparon 9 de 12 plazas. Por eso: un clic a las T sobre la página ya preparada; mientras el portal procesa (`Sys.WebForms.PageRequestManager…get_isInAsyncPostBack()`) no se vuelve a pulsar (hasta 45 s); reintentos con clic directo y recarga solo cada 3 fallos.
+- **30/09 18:00 (fallo real):** el clic tardó 24 s en volver, la lista de turnos desapareció mientras el portal la redibujaba y una recarga agotó los 20 s → se abandonó. Ahora: clic con `no_wait_after` y vigilancia propia; esperar a que la lista vuelva (20 s); si la página se rompe o hay error, volver a entrar (Home → servicio → centro → día) con espera creciente 2/4/8/15 s (se reinicia cuando el portal responde al clic); preparación con hasta 3 reintentos; acciones de 45 s; captura de cada intento fallido.
+- **Ventana de intentos:** `BOOKING_WINDOW_S` (10 min por defecto; entre semana el portal se cae varios minutos en la apertura). Para antes solo si entra en el carrito, el portal confirma 0 plazas o un mensaje definitivo.
+- Carrito: se confirma solo si hay **un** elemento y es este turno (fecha y hora), no pide condiciones, aparece Monedero y saldo ≥ total. Si al confirmar sale del dominio del portal (pasarela de tarjeta) → error, no se toca.
+- **Verificado con una compra real (30/09, 4,00 €, anulada después):** tras «Confirmar la compra» se llega a `/DeportesWeb/Modulos/VentaServicios/CarritoResultado` con «Monedero Pago 4,00 €», «Operación <número>» y «Añadir a mi calendario» (no hay texto tipo «compra realizada»). Éxito = `CarritoResultado` + «Operación N». Si no, `revisar`. Se guarda HTML/captura en `data/capturas/reservas/job<id>/`.
+- Al pulsar la hora, el portal navega al carrito (UpdatePanel → `pageRedirect`): leer la página en ese momento da «Execution context was destroyed»; se trata como "navegando", no como error. Tras «Confirmar», cualquier fallo de lectura es `revisar`, nunca `fallido`.
+- Un turno que se queda en el carrito aparece en *Mi cuenta → Entradas de uso libre* como **«Pendiente»** y bloquea volver a pulsarlo: «La sesión seleccionada no permite más de 1 reserva(s) por persona.» El bot entonces **retoma el carrito** con el enlace de la cabecera `#aCarrito` (abrir la URL a mano no vale) y paga solo si el carrito es solo ese turno. Ese mensaje es definitivo: no se reintenta.
+- **Modo prueba:** todo igual hasta T, pero no pulsa el turno (pulsar ya lo mete en el carrito); comprueba que se podía pulsar. Probado en real el 30/09 (turno 02/10 18:00, abría 17:00).
+- `DRY_RUN=true` en el servidor fuerza modo prueba en todo.
+- Siempre avisa por Telegram. Si no hay plaza, el aviso trae [👀 Observar] [Ignorar]; «Observar» crea una vigilancia del mismo turno (`on_free=reservar`). Vigilancias con `avisar` mandan [Reservar ahora].
+- Cerca de una apertura (±2 min alrededor de la preparación) no corren precarga ni vigilancias; las reservas no esperan el candado del navegador.
+
+### Rendimiento (medido 2026-09-30)
+
+- El portal tarda 3–10 s en servir una página entera; a veces más (timeout de navegación a 45 s).
+- No se descargan imágenes, vídeos ni fuentes (`context.route`), y hay un solo navegador a la vez en el proceso (`_BROWSER_LOCK`).
+- Varios centros en una visita (`fetch_slots_many`): ~10 s por centro con la semana entera.
+- **Precarga** (`src/core/prefetch.py`) al elegir perfil, al probar la conexión con éxito y al abrir "Reservar": lista de centros si tiene >1 día y turnos de la semana de los **favoritos** del perfil si tienen >10 min. Solo si el perfil tiene la conexión en estado `ok` (tras un login rechazado no reintenta sola). Un hilo, una precarga pendiente por perfil.
+- Los tests nunca tocan el portal real: `tests/conftest.py` apaga la precarga y hace fallar cualquier `open_context`.
 
 ### Reglas de negocio (fuentes: madrid.es y sede electrónica)
 
@@ -142,7 +212,7 @@ Esto es lo observado hasta ahora. Se irá ampliando; marca como **verificado** l
   - SQLite con `sqlite3` de la stdlib (sin ORM), esquema en `src/db/database.py`.
   - PWA: `manifest.webmanifest` y `sw.js` servidos desde la raíz; el service worker no cachea nada a propósito.
   - Si `DRY_RUN=true` en el servidor, todas las programaciones se guardan en modo prueba aunque el formulario diga otra cosa.
-  - El polideportivo es texto libre con sugerencias de los ya usados, hasta que el hito 4 lea la lista real del portal.
+  - "Reservar" en cuatro pasos: servicio → polideportivo (lista guardada en la BD, buscador sin tildes, favoritos arriba) → semana con turnos y plazas (foto guardada en `slots`, compartida entre perfiles, se refresca sola si tiene >10 min y como mucho una vez por minuto) → confirmar reservar u observar. La lista se trae del portal con "Actualizar desde el portal" (tablas `centers`, `center_services`, `favorites`).
 - **Estructura de `src/api/`:** los routers solo leen el formulario, llaman a `forms` / `db` y renderizan. La validación va en `forms.py` (se prueba sin levantar la web) y el acceso a datos en `src/db/`. Una pantalla nueva = un router nuevo registrado en `app.py`.
 - **Configuración (hito 1):** `pydantic-settings` lee `.env` / variables de entorno (`src/config.py`). Las dependencias de la web, el scheduler y Telegram se añadirán en su hito, no antes.
 

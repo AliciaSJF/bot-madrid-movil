@@ -1,0 +1,82 @@
+{% extends "app_base.html" %}
+{% block title %}{{ SERVICES[service] }}{% endblock %}
+{% block header %}
+<header class="topbar">
+  <a class="back" href="/reservar" aria-label="Volver a elegir servicio">‹</a>
+  <h1 class="topbar-title">{{ SERVICES[service] }}</h1>
+  {% include "_theme_toggle.html" %}
+  <a class="avatar avatar-sm" href="/perfiles" style="--c: {{ profile.color }}" aria-label="Cambiar de perfil ({{ profile.display_name }})">{{ profile.initial }}</a>
+</header>
+{% endblock %}
+{% block content %}
+<p class="step">Paso 2 de 4 · Elige el polideportivo</p>
+
+{% if centers %}
+<input class="search" type="search" id="center-search" placeholder="Buscar polideportivo o barrio" aria-label="Buscar polideportivo" autocomplete="off">
+
+<ul class="center-list" id="center-list">
+  {% for c in centers %}
+  <li class="center" data-search="{{ (c.name ~ ' ' ~ c.address) | lower }}">
+    <a class="center-link" href="/reservar/{{ service }}/{{ c.portal_id }}">
+      <span class="center-name">{{ c.name }}</span>
+      <span class="center-address">{{ c.address }}</span>
+    </a>
+    <form method="post" action="/favoritos/{{ c.portal_id }}" class="fav-form">
+      <input type="hidden" name="favorite" value="{{ 'false' if c.is_favorite else 'true' }}">
+      <input type="hidden" name="next" value="/reservar/{{ service }}">
+      <button class="fav" type="submit" aria-pressed="{{ 'true' if c.is_favorite else 'false' }}" aria-label="Favorito: {{ c.name }}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>
+      </button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
+<p class="empty" id="no-results" hidden>Ningún polideportivo coincide.</p>
+{% else %}
+<div class="empty">
+  <p>Todavía no hay lista de polideportivos para este servicio.</p>
+</div>
+{% endif %}
+
+<form method="post" action="/reservar/{{ service }}/actualizar" class="refresh"
+      onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Consultando el portal…'">
+  <button class="btn {{ 'btn-ghost' if centers else 'btn-primary' }}" type="submit">
+    {{ 'Actualizar desde el portal' if centers else 'Cargar polideportivos del portal' }}
+  </button>
+  {% if updated_at %}<p class="hint">Actualizada: {{ updated_at | slot }}</p>{% endif %}
+</form>
+
+<script>
+  // Buscar sin tildes ni mayúsculas
+  const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const search = document.getElementById("center-search");
+  if (search) {
+    const items = [...document.querySelectorAll("#center-list .center")];
+    items.forEach((li) => (li.dataset.search = norm(li.dataset.search)));
+    search.addEventListener("input", () => {
+      const q = norm(search.value.trim());
+      let shown = 0;
+      items.forEach((li) => {
+        const hit = li.dataset.search.includes(q);
+        li.hidden = !hit;
+        shown += hit;
+      });
+      document.getElementById("no-results").hidden = shown > 0;
+    });
+  }
+
+  // Favorito sin recargar la página
+  document.querySelectorAll(".fav-form").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector(".fav");
+      const input = form.querySelector("[name=favorite]");
+      const res = await fetch(form.action, { method: "POST", body: new FormData(form), headers: { "X-Requested-With": "fetch" } });
+      if (!res.ok) return form.submit();
+      const nowFavorite = input.value === "true";
+      button.setAttribute("aria-pressed", String(nowFavorite));
+      input.value = String(!nowFavorite);
+    });
+  });
+</script>
+{% endblock %}

@@ -2,7 +2,6 @@
 {% block title %}Mis reservas{% endblock %}
 {% block heading %}Mis reservas{% endblock %}
 {% block content %}
-<p class="notice">De momento el bot solo guarda las programaciones: todavía no se conecta al portal.</p>
 
 {% if not jobs %}
 <div class="empty">
@@ -19,7 +18,8 @@
       <span class="badge badge-{{ job.status }}">{{ STATUS_LABELS[job.status] }}</span>
     </div>
     <p class="job-when">{{ job.slot_at | slot }}</p>
-    <p class="job-center">{{ job.center }}</p>
+    <p class="job-center">{{ job.center }}{% if " · " in job.activity %} · {{ job.activity | activity }}{% endif %}</p>
+    {% if job.result_message %}<p class="job-result">{{ job.result_message }}</p>{% endif %}
     <p class="job-meta">
       {{ MODES[job.mode] }}{% if job.mode == "observar" and job.on_free %} · {{ ON_FREE[job.on_free] | lower }}{% endif %}
       {% if job.dry_run %}<span class="badge badge-test">Prueba</span>{% endif %}
@@ -27,6 +27,11 @@
     {% if job.is_active %}
     <form method="post" action="/reservas/{{ job.id }}/cancelar" onsubmit="return confirm('¿Cancelar esta programación?')">
       <button class="btn btn-secondary" type="submit">Cancelar</button>
+    </form>
+    {% elif job.id in cancellable %}
+    <form method="post" action="/reservas/{{ job.id }}/anular"
+          onsubmit="if (!confirm('¿Anular esta reserva en el portal? El importe vuelve a tu monedero.')) return false; this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Anulando en el portal…';">
+      <button class="btn btn-secondary" type="submit">Anular reserva</button>
     </form>
     {% endif %}
   </li>

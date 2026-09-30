@@ -16,7 +16,9 @@ PORTAL_STATUS_LABELS = {
     "error": "Error al conectar",
 }
 
-_COLUMNS = "id, display_name, color, portal_username, portal_status, portal_checked_at, portal_message"
+_COLUMNS = (
+    "id, display_name, color, portal_username, portal_status, portal_checked_at, portal_message, telegram_chat_id"
+)
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,11 @@ class Profile:
     portal_status: str = "sin_probar"
     portal_checked_at: datetime | None = None
     portal_message: str | None = None
+    telegram_chat_id: int | None = None
+
+    @property
+    def telegram_linked(self) -> bool:
+        return self.telegram_chat_id is not None
 
     @property
     def initial(self) -> str:
@@ -44,6 +51,7 @@ def _from_row(row: sqlite3.Row) -> Profile:
         portal_status=row["portal_status"],
         portal_checked_at=datetime.fromisoformat(checked) if checked else None,
         portal_message=row["portal_message"],
+        telegram_chat_id=int(row["telegram_chat_id"]) if row["telegram_chat_id"] else None,
     )
 
 
@@ -96,4 +104,37 @@ def set_portal_status(conn: sqlite3.Connection, profile_id: int, status: str, me
     conn.execute(
         "UPDATE profiles SET portal_status = ?, portal_checked_at = ?, portal_message = ? WHERE id = ?",
         (status, datetime.now(UTC).isoformat(), message, profile_id),
+    )
+
+
+# --- Telegram ------------------------------------------------------------------
+
+def set_telegram_link_code(conn: sqlite3.Connection, profile_id: int, code: str, expires: datetime) -> None:
+    conn.execute(
+        "UPDATE profiles SET telegram_link_code = ?, telegram_link_expires = ? WHERE id = ?",
+        (code, expires.astimezone(UTC).isoformat(), profile_id),
+    )
+
+
+def find_by_link_code(conn: sqlite3.Connection, code: str, now: datetime) -> int | None:
+    """Perfil con ese código de vinculación, si no ha caducado."""
+    row = conn.execute(
+        "SELECT id, telegram_link_expires FROM profiles WHERE telegram_link_code = ?", (code,)
+    ).fetchone()
+    if row is None or datetime.fromisoformat(row["telegram_link_expires"]) < now:
+        return None
+    return row["id"]
+
+
+def has_pending_link(conn: sqlite3.Connection, profile_id: int, now: datetime) -> bool:
+    row = conn.execute("SELECT telegram_link_expires FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+    return bool(row and row["telegram_link_expires"] and datetime.fromisoformat(row["telegram_link_expires"]) >= now)
+
+
+def set_telegram_chat(conn: sqlite3.Connection, profile_id: int, chat_id: int | None) -> None:
+    """Guarda (o quita, con None) el chat del perfil y anula cualquier código pendiente."""
+    conn.execute(
+        "UPDATE profiles SET telegram_chat_id = ?, telegram_link_code = NULL, telegram_link_expires = NULL "
+        "WHERE id = ?",
+        (str(chat_id) if chat_id is not None else None, profile_id),
     )

@@ -31,5 +31,59 @@
   </form>
 </section>
 
+<section class="card account">
+  <div class="job-head">
+    <h2 class="section-title">Avisos por Telegram</h2>
+    {% if profile.telegram_linked %}<span class="badge badge-portal-ok">Vinculado</span>
+    {% else %}<span class="badge badge-portal-sin_probar">Sin vincular</span>{% endif %}
+  </div>
+
+  {% if not telegram_configured %}
+  <p class="notice">Falta <code>TELEGRAM_BOT_TOKEN</code> en el <code>.env</code> del servidor (el token que da @BotFather).</p>
+
+  {% elif profile.telegram_linked %}
+  <p class="hint">Los avisos de {{ profile.display_name }} (reserva conseguida, fallos, plazas liberadas) llegan a su Telegram.</p>
+  <form method="post" action="/perfil/telegram/prueba">
+    <button class="btn btn-primary" type="submit">Enviar mensaje de prueba</button>
+  </form>
+  <form method="post" action="/perfil/telegram/desvincular" onsubmit="return confirm('¿Dejar de recibir avisos en este Telegram?')">
+    <button class="btn btn-link" type="submit">Desvincular</button>
+  </form>
+
+  {% elif telegram_link %}
+  <ol class="steps">
+    <li>Abre Telegram con el botón de abajo.</li>
+    <li>Pulsa <strong>Iniciar</strong> en la conversación con el bot.</li>
+    <li>Vuelve aquí: se actualizará solo.</li>
+  </ol>
+  <a class="btn btn-primary" href="{{ telegram_link }}" target="_blank" rel="noopener">Abrir Telegram</a>
+  <p class="hint" id="tg-status" role="status">Esperando a que pulses «Iniciar»… (el enlace vale 15 minutos)</p>
+  <script>
+    // Preguntar cada 3 s si ya se ha pulsado "Iniciar"; parar a los 15 min
+    (() => {
+      const deadline = Date.now() + 15 * 60 * 1000;
+      const status = document.getElementById("tg-status");
+      const tick = async () => {
+        if (Date.now() > deadline) { status.textContent = "El enlace ha caducado: vuelve a pulsar «Vincular Telegram»."; return; }
+        try {
+          const res = await fetch("/perfil/telegram/comprobar", { method: "POST" });
+          const data = await res.json();
+          if (data.linked) return location.reload();
+          if (data.error) status.textContent = data.error;
+        } catch { /* sin red un momento: se reintenta */ }
+        setTimeout(tick, 3000);
+      };
+      setTimeout(tick, 3000);
+    })();
+  </script>
+
+  {% else %}
+  <p class="hint">Cada perfil vincula su propio Telegram y recibe solo sus avisos.</p>
+  <form method="post" action="/perfil/telegram/vincular">
+    <button class="btn btn-primary" type="submit">Vincular Telegram</button>
+  </form>
+  {% endif %}
+</section>
+
 <a class="btn btn-ghost" href="/perfiles">Cambiar de perfil</a>
 {% endblock %}

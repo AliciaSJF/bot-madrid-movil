@@ -41,16 +41,13 @@ class ProfileForm:
 
 @dataclass
 class BookingForm:
-    center: str = ""
-    service: str = "multitrabajo"
+    """Último paso de "Reservar": el servicio y el centro ya vienen elegidos en la URL."""
+
     slot_date: str = ""
     slot_time: str = ""
     mode: str = "reservar"
     on_free: str = "reservar"
     dry_run: bool = True
-
-    def __post_init__(self):
-        self.center = self.center.strip()
 
     def slot_at(self, zone: ZoneInfo) -> datetime | None:
         """Fecha y hora del turno con zona horaria, o None si no se pueden leer."""
@@ -64,10 +61,6 @@ class BookingForm:
         slot_at = self.slot_at(zone)
         if slot_at is None:
             return "Fecha u hora no válidas."
-        if not self.center or len(self.center) > 80:
-            return "Indica el polideportivo."
-        if self.service not in jobs_repo.SERVICES:
-            return "Elige un servicio."
         if self.mode not in jobs_repo.MODES:
             return "Elige reservar u observar."
         if self.on_free not in jobs_repo.ON_FREE:

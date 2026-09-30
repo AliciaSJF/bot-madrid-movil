@@ -4,6 +4,7 @@ Arranque: python -m scripts.cli web  (o uvicorn --factory src.api.app:create_app
 """
 
 import secrets
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
@@ -11,10 +12,11 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from src.api.deps import Redirect, redirect
-from src.api.routers import account, booking, house, jobs, profiles, pwa
+from src.api.routers import account, booking, favorites, house, jobs, profiles, pwa
 from src.api.templating import STATIC_DIR
 from src.config import Settings, get_settings
 from src.db.database import connect, get_setting, init_db, set_setting
+from src.worker.scheduler import start_worker
 
 SESSION_SECRET_KEY = "session_secret"
 SESSION_MAX_AGE = 60 * 24 * 3600  # 60 días: en el móvil casi nunca se vuelve a pedir
@@ -24,7 +26,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     init_db(settings.data_dir)
 
-    app = FastAPI(title="Bot Deportes Madrid", docs_url=None, redoc_url=None, openapi_url=None)
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        # Programador de reservas, vigilancias y escucha de Telegram (apagado en los tests)
+        worker = start_worker(settings)
+        yield
+        if worker is not None:
+            worker.stop()
+
+    app = FastAPI(title="Bot Deportes Madrid", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.settings = settings
 
     app.add_middleware(
@@ -36,8 +46,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-    for router in (pwa.router, house.router, profiles.router, account.router, booking.router, jobs.router):
-        app.include_router(router)
+    routers = (pwa, house, profiles, account, booking, favorites, jobs)
+    for module in routers:
+        app.include_router(module.router)
 
     @app.exception_handler(Redirect)
     async def handle_redirect(_request: Request, exc: Redirect) -> Response:

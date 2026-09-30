@@ -5,6 +5,7 @@
 {% block header %}
 <header class="topbar">
   <h1 class="topbar-title">{% block heading %}{% endblock %}</h1>
+  {% include "_theme_toggle.html" %}
   <a class="avatar avatar-sm" href="/perfiles" style="--c: {{ profile.color }}" aria-label="Cambiar de perfil ({{ profile.display_name }})">{{ profile.initial }}</a>
 </header>
 {% endblock %}

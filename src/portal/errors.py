@@ -15,3 +15,7 @@ class VerificationRequired(PortalError):
 
 class CaptchaDetected(PortalError):
     """Hay un captcha. El bot no lo intenta resolver: para y avisa."""
+
+
+class SessionExpired(PortalError):
+    """La sesión guardada ya no vale: hay que volver a iniciar sesión."""

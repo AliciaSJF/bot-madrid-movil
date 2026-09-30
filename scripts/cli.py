@@ -57,7 +57,7 @@ def cmd_capture(args: argparse.Namespace) -> int:
     if profile is None:
         return 1
     try:
-        out_dir = capture_pages(settings, profile.id, args.rutas)
+        out_dir = capture_pages(settings, profile.id, args.rutas, args.pulsar)
     except PortalError as exc:
         print(f"Error: {exc}")
         return 1
@@ -98,6 +98,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_capture = sub.add_parser("capturar", help="guardar páginas del portal en data/capturas/")
     p_capture.add_argument("--perfil", required=True)
     p_capture.add_argument("rutas", nargs="*", default=["/DeportesWeb/Home"], help="rutas del portal")
+    p_capture.add_argument(
+        "--pulsar", action="append", default=[], metavar="TÍTULO",
+        help="tarjeta de menú a pulsar tras abrir las rutas (se puede repetir, en orden)",
+    )
     p_capture.set_defaults(func=cmd_capture)
 
     return parser

@@ -11,9 +11,12 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Deportes">
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js"></script>
 </head>
 <body class="{% block body_class %}{% endblock %}">
   {% block header %}{% endblock %}
+  {# Pantallas sin cabecera (entrar, perfiles): el botón de tema flota arriba a la derecha #}
+  {% if not self.header() | trim %}{% with floating = true %}{% include "_theme_toggle.html" %}{% endwith %}{% endif %}
   <main class="page">
     {% if flash %}<p class="flash" role="status">{{ flash }}</p>{% endif %}
     {% block content %}{% endblock %}

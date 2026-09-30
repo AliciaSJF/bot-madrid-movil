@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- Carrito FALSO y mínimo: reproduce los ids y la estructura que lee src/portal/booking.py.
+     Sin nombres, correos ni datos de sesión reales. -->
+<html lang="es">
+<body>
+  <div id="ContentFixedSection_uCarritoConfirmar_divCart">
+    <ul class="list-group cart">
+      <li class="list-group-item">
+        <div>Persona de prueba</div>
+        <div><span>SALA MUSCULACION</span><span>jueves, 1 de octubre de 2026</span><span>Sala Multitrabajo B</span>
+          <div><span>Inicio</span><span>14:00</span></div><div><span>Fin</span><span>15:30</span></div></div>
+        <div class="cart-item-discounts"><div>Precio sin descuentos/incrementos</div><div>5,00 €</div></div>
+        <span class="cart-item-final-amount">4,00 €</span>
+      </li>
+      <li id="ContentFixedSection_uCarritoConfirmar_liTotal" class="list-group-item carrito-total"><div>Total</div><div>4,00 €</div></li>
+    </ul>
+  </div>
+  <div id="ContentFixedSection_uCarritoConfirmar_divPaymentMethods">
+    <ul class="list-group">
+      <li class="list-group-item"><input type="radio" name="ContentFixedSection_uCarritoConfirmar_payment_method_filter"><span>Tarjeta bancaria</span></li>
+      <li class="list-group-item"><input type="radio" name="ContentFixedSection_uCarritoConfirmar_payment_method_filter"><span>Bizum</span></li>
+      <li class="list-group-item"><input type="radio" name="ContentFixedSection_uCarritoConfirmar_payment_method_filter"><span>Monedero</span><span>Saldo disponible</span><span>20,00 €</span></li>
+    </ul>
+  </div>
+  <div id="ContentFixedSection_uCarritoConfirmar_divTerms" class="form-group"></div>
+  <button id="ContentFixedSection_uCarritoConfirmar_btnConfirmCart" type="button">Confirmar la compra</button>
+</body>
+</html>

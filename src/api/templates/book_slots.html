@@ -1,0 +1,87 @@
+{% extends "app_base.html" %}
+{% block title %}{{ center.name }}{% endblock %}
+{% block header %}
+<header class="topbar">
+  <a class="back" href="/reservar/{{ service }}" aria-label="Volver a elegir polideportivo">‹</a>
+  <h1 class="topbar-title">{{ center.name }}</h1>
+  {% include "_theme_toggle.html" %}
+  <a class="avatar avatar-sm" href="/perfiles" style="--c: {{ profile.color }}" aria-label="Cambiar de perfil ({{ profile.display_name }})">{{ profile.initial }}</a>
+</header>
+{% endblock %}
+{% block content %}
+<p class="step">Paso 3 de 4 · {{ SERVICES[service] }} · Elige turno</p>
+
+<nav class="week" aria-label="Días">
+  {% for d in days %}
+  <a class="week-day{% if d == selected %} is-selected{% endif %}" href="?dia={{ d.isoformat() }}" {% if d == selected %}aria-current="date"{% endif %}>
+    <span class="week-dow">{{ d | weekday }}</span>
+    <span class="week-num">{{ d.day }}</span>
+    {% if free_by_day[d] %}<span class="week-dot" aria-label="{{ free_by_day[d] }} turnos con plazas"></span>
+    {% else %}<span class="week-dot is-empty" aria-hidden="true"></span>{% endif %}
+  </a>
+  {% endfor %}
+</nav>
+
+<div id="slots-loading" class="notice loading" {% if not stale %}hidden{% endif %}>
+  Consultando huecos en el portal…
+</div>
+
+{% if day_slots %}
+{% set groups = day_slots | groupby("activity") %}
+{% for group in groups %}
+{% if groups | length > 1 %}<h2 class="activity-title">{{ group.grouper | activity }}</h2>{% endif %}
+<ul class="slots" aria-label="Turnos del {{ selected | weekday }} {{ selected | day_month }}{% if groups | length > 1 %}, {{ group.grouper | activity }}{% endif %}">
+  {% for s in group.list %}
+  <li>
+    {% if s.status == "pasado" %}
+    <span class="slot is-pasado" aria-disabled="true">
+      <span class="slot-time">{{ s.time.strftime("%H:%M") }}</span>
+      <span class="slot-info">Pasado</span>
+    </span>
+    {% else %}
+    <a class="slot is-{{ s.status }}" href="/reservar/{{ service }}/{{ center.portal_id }}/programar?dia={{ s.day.isoformat() }}&amp;hora={{ s.time.strftime('%H:%M') }}&amp;actividad={{ s.activity | urlencode }}">
+      <span class="slot-time">{{ s.time.strftime("%H:%M") }}</span>
+      {% if s.status == "libre" %}
+      <span class="slot-info"><strong>{{ s.free }}</strong>/{{ s.total }} libres</span>
+      {% elif s.status == "completo" %}
+      <span class="slot-info">Completo · observar</span>
+      {% else %}
+      <span class="slot-info">Abre {{ s.opens_at | slot }}</span>
+      {% endif %}
+    </a>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endfor %}
+{% elif has_data_by_day[selected] %}
+<div class="empty"><p>No hay turnos este día.</p></div>
+{% elif not stale %}
+<div class="empty"><p>Sin datos de este día todavía.</p></div>
+{% endif %}
+
+<div class="legend" aria-hidden="true">
+  <span><i class="dot is-libre"></i>Libre</span>
+  <span><i class="dot is-completo"></i>Completo</span>
+  <span><i class="dot is-sin_abrir"></i>Aún no abre</span>
+</div>
+
+<form method="post" action="/reservar/{{ service }}/{{ center.portal_id }}/huecos" class="refresh" id="refresh-form"
+      onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Consultando el portal…'">
+  <input type="hidden" name="dia" value="{{ selected.isoformat() }}">
+  <button class="btn btn-ghost" type="submit">Actualizar huecos</button>
+  {% if fetched_at %}<p class="hint">Consultado: {{ fetched_at | slot }}</p>{% endif %}
+</form>
+
+{% if stale %}
+<script>
+  // Foto vieja o inexistente: pedirla al portal sin que haga falta pulsar nada
+  (async () => {
+    const form = document.getElementById("refresh-form");
+    const res = await fetch(form.action, { method: "POST", body: new FormData(form), headers: { "X-Requested-With": "fetch" } });
+    if (res.ok) location.reload();
+    else document.getElementById("slots-loading").textContent = "No se pudieron consultar los huecos.";
+  })();
+</script>
+{% endif %}
+{% endblock %}

@@ -16,26 +16,88 @@ CREATE TABLE IF NOT EXISTS profiles (
     portal_username     TEXT NOT NULL,
     portal_password_enc TEXT NOT NULL,
     telegram_chat_id    TEXT,
+    telegram_link_code  TEXT,
+    telegram_link_expires TEXT,
     portal_status       TEXT NOT NULL DEFAULT 'sin_probar',
     portal_checked_at   TEXT,
     portal_message      TEXT,
     created_at          TEXT NOT NULL
 );
 
+-- Polideportivos tal como los lista el portal; portal_id es su facility_code
+CREATE TABLE IF NOT EXISTS centers (
+    portal_id   INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL,
+    address     TEXT NOT NULL DEFAULT '',
+    updated_at  TEXT NOT NULL
+);
+
+-- Qué servicios de uso libre ofrece cada centro (según la última actualización)
+CREATE TABLE IF NOT EXISTS center_services (
+    portal_id   INTEGER NOT NULL REFERENCES centers(portal_id) ON DELETE CASCADE,
+    service     TEXT NOT NULL CHECK (service IN ('multitrabajo', 'piscina')),
+    PRIMARY KEY (portal_id, service)
+);
+
+-- Favoritos de cada perfil (por centro, valen para todos los servicios)
+CREATE TABLE IF NOT EXISTS favorites (
+    profile_id  INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    portal_id   INTEGER NOT NULL REFERENCES centers(portal_id) ON DELETE CASCADE,
+    PRIMARY KEY (profile_id, portal_id)
+);
+
 CREATE TABLE IF NOT EXISTS jobs (
     id          INTEGER PRIMARY KEY,
     profile_id  INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     center      TEXT NOT NULL,
+    center_id   INTEGER REFERENCES centers(portal_id),
+    activity    TEXT NOT NULL DEFAULT '',
     service     TEXT NOT NULL CHECK (service IN ('multitrabajo', 'piscina')),
     slot_at     TEXT NOT NULL,
     mode        TEXT NOT NULL CHECK (mode IN ('reservar', 'observar')),
     on_free     TEXT CHECK (on_free IN ('reservar', 'avisar')),
     dry_run     INTEGER NOT NULL DEFAULT 1,
     status      TEXT NOT NULL,
-    created_at  TEXT NOT NULL
+    result_message TEXT,
+    source_job_id INTEGER REFERENCES jobs(id),
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_profile ON jobs(profile_id, slot_at);
+
+-- Historial de cada programación: qué hizo el bot y qué pasó (sin datos sensibles)
+CREATE TABLE IF NOT EXISTS attempts (
+    id          INTEGER PRIMARY KEY,
+    job_id      INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    at          TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    result      TEXT NOT NULL,
+    message     TEXT NOT NULL DEFAULT ''
+);
+
+-- Última foto de los turnos de un centro/servicio/día (sirve a todos los perfiles).
+-- day y time en hora de Madrid, tal como los muestra el portal.
+CREATE TABLE IF NOT EXISTS slots (
+    service     TEXT NOT NULL,
+    center_id   INTEGER NOT NULL,
+    day         TEXT NOT NULL,
+    time        TEXT NOT NULL,
+    activity    TEXT NOT NULL DEFAULT '',
+    free        INTEGER NOT NULL,
+    total       INTEGER NOT NULL,
+    selectable  INTEGER NOT NULL,
+    PRIMARY KEY (service, center_id, day, activity, time)
+);
+
+-- Cuándo se consultó cada día (también los días sin turnos)
+CREATE TABLE IF NOT EXISTS slot_fetches (
+    service     TEXT NOT NULL,
+    center_id   INTEGER NOT NULL,
+    day         TEXT NOT NULL,
+    fetched_at  TEXT NOT NULL,
+    PRIMARY KEY (service, center_id, day)
+);
 """
 
 
@@ -45,6 +107,13 @@ MIGRATIONS = [
     ("profiles", "portal_status", "TEXT NOT NULL DEFAULT 'sin_probar'"),
     ("profiles", "portal_checked_at", "TEXT"),
     ("profiles", "portal_message", "TEXT"),
+    ("jobs", "center_id", "INTEGER REFERENCES centers(portal_id)"),
+    ("jobs", "activity", "TEXT NOT NULL DEFAULT ''"),
+    ("profiles", "telegram_link_code", "TEXT"),
+    ("profiles", "telegram_link_expires", "TEXT"),
+    ("jobs", "result_message", "TEXT"),
+    ("jobs", "source_job_id", "INTEGER REFERENCES jobs(id)"),
+    ("jobs", "updated_at", "TEXT"),
 ]
 
 

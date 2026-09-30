@@ -7,8 +7,10 @@ from fastapi.testclient import TestClient
 
 from src.api.app import create_app
 from src.config import Settings
+from src.db import centers as centers_repo
 from src.db import crypto
-from src.db.database import db_path
+from src.db import slots as slots_repo
+from src.db.database import connect, db_path
 
 HOUSE_PASSWORD = "casa-segura-123"
 PORTAL_PASSWORD = "portal-secreto-456"
@@ -43,17 +45,46 @@ def create_profile(client, name="Alicia"):
     return r
 
 
-def book(client, settings, days=2, **overrides):
-    slot = datetime.now(settings.zone) + timedelta(days=days)
+CHOPERA = 30
+
+
+def seed_centers(settings):
+    """Lista de centros como si se hubiera actualizado desde el portal."""
+    conn = connect(settings.data_dir)
+    centers_repo.replace_service_centers(
+        conn, "multitrabajo", [(CHOPERA, "La Chopera", "Paseo de Fernán Núñez, 3"), (1, "Aluche", "Av. de las Águilas, 14")]
+    )
+    centers_repo.replace_service_centers(conn, "piscina", [(1, "Aluche", "Av. de las Águilas, 14")])
+    conn.commit()
+    conn.close()
+
+
+def seed_slot(settings, day, at="19:00", free=3, total=10, service="multitrabajo", center_id=CHOPERA):
+    """Turno guardado como si se hubiera consultado en el portal."""
+    from datetime import time
+
+    conn = connect(settings.data_dir)
+    slots_repo.replace_days(
+        conn, service, center_id, [day],
+        [slots_repo.StoredSlot(day, time.fromisoformat(at), "SALA", free, total, free > 0)],
+        datetime.now(settings.zone),
+    )
+    conn.commit()
+    conn.close()
+
+
+def book(client, settings, days=2, center_id=CHOPERA, service="multitrabajo", **overrides):
+    seed_centers(settings)
+    day = (datetime.now(settings.zone) + timedelta(days=days)).date()
+    seed_slot(settings, day, service=service, center_id=center_id)
     data = {
-        "center": "La Chopera",
-        "service": "multitrabajo",
-        "slot_date": slot.date().isoformat(),
+        "slot_date": day.isoformat(),
         "slot_time": "19:00",
         "mode": "reservar",
         "on_free": "reservar",
+        "activity": "SALA",
     } | overrides
-    return client.post("/reservar", data=data)
+    return client.post(f"/reservar/{service}/{center_id}/programar", data=data)
 
 
 def test_first_visit_asks_to_create_house_password(client):
@@ -170,7 +201,11 @@ def test_all_screens_render(client, settings):
     assert client.get("/perfiles/nuevo").status_code == 200
     create_profile(client)
     book(client, settings)
-    for url in ("/perfiles", "/perfil", "/reservar", "/reservas"):
+    day = (datetime.now(settings.zone) + timedelta(days=2)).date().isoformat()
+    for url in (
+        "/perfiles", "/perfil", "/reservar", "/reservar/multitrabajo", f"/reservar/multitrabajo/{CHOPERA}",
+        f"/reservar/multitrabajo/{CHOPERA}/programar?dia={day}&hora=19:00&actividad=SALA", "/reservas",
+    ):
         assert client.get(url).status_code == 200, url
 
 
@@ -193,6 +228,94 @@ def test_account_page_and_connection_check(client, monkeypatch):
     assert client.post("/perfil/probar").headers["location"] == "/perfil"
     page = client.get("/perfil").text
     assert "Conectada" in page and "Conexión correcta" in page
+
+
+def test_center_list_is_per_service_with_favorites_first(client, settings):
+    setup_house(client)
+    create_profile(client)
+    seed_centers(settings)
+
+    page = client.get("/reservar/multitrabajo").text
+    assert page.index("Aluche") < page.index("La Chopera")  # por nombre
+    assert "La Chopera" not in client.get("/reservar/piscina").text  # no tiene nado libre
+
+    r = client.post(f"/favoritos/{CHOPERA}", data={"favorite": "true"}, headers={"X-Requested-With": "fetch"})
+    assert r.status_code == 204
+    page = client.get("/reservar/multitrabajo").text
+    assert page.index("La Chopera") < page.index("Aluche")  # favoritos primero
+
+
+def test_center_not_offering_service_goes_back_to_list(client, settings):
+    setup_house(client)
+    create_profile(client)
+    r = book(client, settings, center_id=CHOPERA, service="piscina")
+    assert r.headers["location"] == "/reservar/piscina"
+
+
+def test_unknown_service_is_rejected(client):
+    setup_house(client)
+    create_profile(client)
+    assert client.get("/reservar/padel").status_code == 422
+
+
+def test_refresh_centers_shows_portal_error(client, monkeypatch):
+    from src import portal
+    from src.api.routers import booking
+
+    setup_house(client)
+    create_profile(client)
+
+    def failing(*_args):
+        raise portal.PortalError("Problema de red al abrir el portal (ERR_X).")
+
+    monkeypatch.setattr(booking, "refresh_centers", failing)
+    r = client.post("/reservar/multitrabajo/actualizar")
+    assert r.headers["location"] == "/reservar/multitrabajo"
+    assert "No se pudo actualizar" in client.get("/reservar/multitrabajo").text
+
+
+def test_slots_page_shows_status_and_links(client, settings):
+    setup_house(client)
+    create_profile(client)
+    seed_centers(settings)
+    from datetime import time
+
+    day = (datetime.now(settings.zone) + timedelta(days=1)).date()
+    conn = connect(settings.data_dir)
+    slots_repo.replace_days(conn, "multitrabajo", CHOPERA, [day], [
+        slots_repo.StoredSlot(day, time(19), "SALA", 0, 10, False),
+        slots_repo.StoredSlot(day, time(20), "SALA", 4, 10, True),
+    ], datetime.now(settings.zone))
+    conn.commit(); conn.close()
+
+    page = client.get(f"/reservar/multitrabajo/{CHOPERA}?dia={day.isoformat()}").text
+    assert "Completo" in page and "4</strong>/10 libres" in page
+    assert f"programar?dia={day.isoformat()}&amp;hora=20:00&amp;actividad=SALA" in page
+
+
+def test_full_slot_offers_observe_first(client, settings):
+    from datetime import time
+
+    setup_house(client)
+    create_profile(client)
+    seed_centers(settings)
+    day = (datetime.now(settings.zone) + timedelta(days=1)).date()
+    conn = connect(settings.data_dir)
+    slots_repo.replace_days(conn, "multitrabajo", CHOPERA, [day], [slots_repo.StoredSlot(day, time(19), "SALA", 0, 10, False)],
+                            datetime.now(settings.zone))
+    conn.commit(); conn.close()
+
+    page = client.get(f"/reservar/multitrabajo/{CHOPERA}/programar?dia={day.isoformat()}&hora=19:00&actividad=SALA").text
+    assert page.index('value="observar"') < page.index('value="reservar"')
+    assert 'value="observar" checked' in page
+
+
+def test_unknown_slot_goes_back_to_week(client, settings):
+    setup_house(client)
+    create_profile(client)
+    seed_centers(settings)
+    r = client.get(f"/reservar/multitrabajo/{CHOPERA}/programar?dia=2030-01-01&hora=19:00")
+    assert r.headers["location"].startswith(f"/reservar/multitrabajo/{CHOPERA}")
 
 
 def test_pwa_files_are_served(client):

@@ -23,8 +23,13 @@ class Settings(BaseSettings):
     # Respeto al portal: la vigilancia nunca consulta más a menudo que esto
     watch_min_interval_s: int = Field(default=30, ge=30)
     max_active_watches: int = Field(default=3, ge=1)
+    # Cuánto sigue intentando una reserva tras la apertura si el portal no responde (entre semana se cae)
+    booking_window_s: int = Field(default=600, ge=60, le=3600)
 
     headless: bool = True
+    # Navegador instalado a usar en vez del Chromium de Playwright (p. ej. "msedge" en Windows).
+    # Vacío = Chromium de Playwright, que es lo que se usa en la Pi.
+    browser_channel: str | None = None
 
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None

@@ -21,8 +21,10 @@
   color-scheme: light;
 }
 
+/* Oscuro: si lo pide el sistema (salvo que se haya elegido "claro") o si se eligió "oscuro".
+   data-theme lo pone theme.js en <html>; sin él, se sigue al sistema. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #111413;
     --surface: #1b1f1e;
     --text: #eef1ef;
@@ -41,7 +43,42 @@
   }
 }
 
+:root[data-theme="dark"] {
+  --bg: #111413;
+  --surface: #1b1f1e;
+  --text: #eef1ef;
+  --muted: #a3aca8;
+  --line: #2e3432;
+  --accent: #2dd4bf;
+  --accent-text: #062b27;
+  --accent-soft: #123b36;
+  --danger: #f97066;
+  --danger-soft: #3a1714;
+  --ok: #4ade80;
+  --ok-soft: #12301d;
+  --warn: #fbbf24;
+  --warn-soft: #3a2c0c;
+  color-scheme: dark;
+}
+
+/* --- botón de tema --- */
+
+.theme-toggle {
+  display: grid; place-items: center; flex: none;
+  width: var(--tap); height: var(--tap); margin-right: -4px;
+  border: 0; border-radius: 50%; background: none; color: var(--muted); cursor: pointer;
+}
+.theme-toggle svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.theme-toggle .icon { display: none; }
+.theme-toggle[data-mode="auto"] .icon-auto,
+.theme-toggle[data-mode="light"] .icon-light,
+.theme-toggle[data-mode="dark"] .icon-dark { display: block; }
+.theme-toggle-floating { position: fixed; top: calc(8px + env(safe-area-inset-top)); right: 12px; z-index: 6; }
+
 * { box-sizing: border-box; }
+
+/* Que [hidden] gane siempre a los display: flex/grid de los componentes */
+[hidden] { display: none !important; }
 
 html { -webkit-text-size-adjust: 100%; }
 
@@ -216,6 +253,7 @@ form:has(input[name="mode"][value="observar"]:checked) .only-observe { display: 
   font: inherit; font-weight: 700; text-decoration: none; cursor: pointer;
 }
 .btn-primary { background: var(--accent); color: var(--accent-text); width: 100%; }
+.btn-real { background: var(--danger); color: #fff; }
 .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
 .btn-secondary { background: transparent; color: var(--danger); border: 1px solid var(--line); }
 .btn-ghost { width: 100%; background: transparent; color: var(--text); border: 1px solid var(--line); }
@@ -249,8 +287,107 @@ form:has(input[name="mode"][value="observar"]:checked) .only-observe { display: 
 }
 .badge-reservado, .badge-avisado { background: var(--ok-soft); color: var(--ok); }
 .badge-fallido, .badge-expirado { background: var(--danger-soft); color: var(--danger); }
-.badge-cancelado { background: var(--line); color: var(--muted); }
+.badge-prueba_ok { background: var(--ok-soft); color: var(--ok); }
+.badge-revisar { background: var(--warn-soft); color: var(--warn); }
+.job-result { font-size: .9rem; margin-top: 6px !important; }
+.badge-anulado, .badge-cancelado { background: var(--line); color: var(--muted); }
 .badge-test { background: var(--warn-soft); color: var(--warn); }
+
+/* --- reservar: pasos --- */
+
+.step { color: var(--muted); font-size: .9rem; font-weight: 600; margin-bottom: 14px; }
+
+.service-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.service-card {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  min-height: 150px; padding: 16px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  color: var(--text); text-decoration: none; font-weight: 700; text-align: center;
+}
+.service-card:hover, .service-card:active { border-color: var(--accent); background: var(--accent-soft); }
+.service-card svg {
+  width: 48px; height: 48px; fill: none; stroke: var(--accent);
+  stroke-width: 3; stroke-linecap: round; stroke-linejoin: round;
+}
+
+input.search {
+  width: 100%; min-height: var(--tap); margin-bottom: 12px;
+  padding: 10px 14px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); color: var(--text); font: inherit;
+}
+
+.center-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.center {
+  display: flex; align-items: center;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+}
+.center-link {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  padding: 12px 4px 12px 14px; color: var(--text); text-decoration: none;
+}
+.center-name { font-weight: 700; }
+.center-address { color: var(--muted); font-size: .85rem; }
+.fav-form { flex: none; }
+.fav {
+  display: grid; place-items: center; width: var(--tap); height: var(--tap); margin-right: 4px;
+  border: 0; border-radius: 50%; background: none; color: var(--muted); cursor: pointer;
+}
+.fav svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+.fav[aria-pressed="true"] { color: #e11d48; }
+.fav[aria-pressed="true"] svg { fill: currentColor; }
+
+.refresh { margin-top: 16px; text-align: center; }
+.refresh .hint { margin-top: 6px; }
+
+.chosen { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; margin-bottom: 16px; }
+.chosen-service { color: var(--accent); font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+.chosen-center { font-weight: 700; font-size: 1.15rem; }
+
+/* --- turnos --- */
+
+.week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 14px; }
+.week-day {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  min-height: 64px; padding: 6px 0; border-radius: 12px;
+  color: var(--text); text-decoration: none; border: 1px solid transparent;
+}
+.week-dow { font-size: .75rem; color: var(--muted); text-transform: capitalize; }
+.week-num { font-size: 1.15rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.week-day.is-selected { background: var(--accent); color: var(--accent-text); }
+.week-day.is-selected .week-dow { color: inherit; }
+.week-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.week-dot.is-empty { background: transparent; }
+.week-day.is-selected .week-dot { background: var(--accent-text); }
+.week-day.is-selected .week-dot.is-empty { background: transparent; }
+
+.slots { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+.slot {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  min-height: 64px; padding: 8px 4px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--text); text-decoration: none; text-align: center;
+}
+.slot-time { font-size: 1.1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.slot-info { font-size: .75rem; color: var(--muted); line-height: 1.2; }
+.slot.is-libre { border-color: var(--ok); background: var(--ok-soft); }
+.slot.is-libre .slot-info { color: var(--ok); }
+.slot.is-completo { border-color: var(--danger-soft); }
+.slot.is-completo .slot-time { color: var(--danger); }
+.slot.is-sin_abrir .slot-time { color: var(--muted); }
+.slot.is-pasado { opacity: .45; }
+.slot.is-pasado .slot-time { text-decoration: line-through; }
+
+.activity-title { font-size: .95rem; margin: 16px 0 8px; }
+.activity-title:first-of-type { margin-top: 0; }
+
+.legend { display: flex; justify-content: center; gap: 14px; margin-top: 14px; font-size: .8rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dot.is-libre { background: var(--ok); }
+.dot.is-completo { background: var(--danger); }
+.dot.is-sin_abrir { background: var(--line); }
+
+.loading { margin-bottom: 12px; }
+.chosen .badge { align-self: flex-start; margin-top: 6px; }
 
 /* --- perfil --- */
 
@@ -263,6 +400,10 @@ form:has(input[name="mode"][value="observar"]:checked) .only-observe { display: 
 .account-name { font-weight: 700; font-size: 1.15rem; }
 .account-user { font-size: .9rem; overflow-wrap: anywhere; }
 .section-title { font-size: 1rem; margin: 0; }
+.account .btn-primary + .hint { margin-top: 10px; }
+.account .btn-link { width: 100%; margin-top: 4px; }
+.steps { margin: 4px 0 12px; padding-left: 20px; }
+.steps li { margin-bottom: 4px; }
 .badge-portal-ok { background: var(--ok-soft); color: var(--ok); }
 .badge-portal-rechazado, .badge-portal-error { background: var(--danger-soft); color: var(--danger); }
 .badge-portal-verificacion { background: var(--warn-soft); color: var(--warn); }

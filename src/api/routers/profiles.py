@@ -8,6 +8,7 @@ from fastapi.responses import Response
 
 from src.api import auth
 from src.api.deps import HouseConn, SettingsDep, redirect
+from src.core.prefetch import schedule_prefetch
 from src.api.forms import ProfileForm
 from src.api.templating import flash, render
 from src.config import Settings
@@ -28,10 +29,13 @@ def picker(request: Request, conn: HouseConn) -> Response:
 
 
 @router.post("/{profile_id}/elegir")
-def choose(request: Request, conn: HouseConn, profile_id: int) -> Response:
-    if profiles_repo.get_profile(conn, profile_id) is None:
+def choose(request: Request, conn: HouseConn, settings: SettingsDep, profile_id: int) -> Response:
+    profile = profiles_repo.get_profile(conn, profile_id)
+    if profile is None:
         return redirect("/perfiles")
     auth.set_current_profile(request.session, profile_id)
+    if profile.portal_status == "ok":
+        schedule_prefetch(settings, profile_id)  # en segundo plano: no hace esperar
     return redirect("/reservas")
 
 

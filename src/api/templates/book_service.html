@@ -1,0 +1,17 @@
+{% extends "app_base.html" %}
+{% block title %}Reservar{% endblock %}
+{% block heading %}Reservar{% endblock %}
+{% block content %}
+<p class="step">Paso 1 de 4 · ¿Qué quieres reservar?</p>
+
+<div class="service-grid">
+  <a class="service-card" href="/reservar/multitrabajo">
+    <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M6 20v8M12 15v18M36 15v18M42 20v8M12 24h24"/></svg>
+    <span>Sala multitrabajo</span>
+  </a>
+  <a class="service-card" href="/reservar/piscina">
+    <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M4 30c4 0 4-3 8-3s4 3 8 3 4-3 8-3 4 3 8 3 4-3 8-3M4 38c4 0 4-3 8-3s4 3 8 3 4-3 8-3 4 3 8 3 4-3 8-3M16 24l6-12 8 6"/><circle cx="34" cy="12" r="3"/></svg>
+    <span>Nado libre</span>
+  </a>
+</div>
+{% endblock %}
