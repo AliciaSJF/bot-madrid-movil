@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Proyecto: nunca subir secretos ni datos personales ---
+data/
+state*.json
+*.har
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+screenshots/
+*.png
+!src/api/static/**/*.png
+playwright-report/
+test-results/
