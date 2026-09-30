@@ -12,7 +12,7 @@ from playwright.sync_api import Page
 
 from src.config import Settings
 from src.portal import selectors as sel
-from src.portal.browser import open_context, session_file
+from src.portal.browser import describe_error, goto, open_context, session_file
 from src.portal.errors import CaptchaDetected, LoginRejected, PortalError, VerificationRequired
 
 LOGIN_RESULT_TIMEOUT_S = 20
@@ -40,19 +40,19 @@ def ensure_session(settings: Settings, profile_id: int, username: str, password:
             context.storage_state(path=state)
             return SessionResult(reused=False)
     except PlaywrightError as exc:
-        # El mensaje de Playwright puede incluir el valor escrito en un campo: no se propaga
-        raise PortalError(f"Fallo del navegador ({type(exc).__name__})") from None
+        # Solo la primera línea y sin usuario ni contraseña; el error original no se encadena
+        raise PortalError(describe_error(exc, username, password)) from None
 
 
 def session_is_valid(page: Page) -> bool:
-    page.goto(sel.HOME_URL, wait_until="domcontentloaded")
+    goto(page, sel.HOME_URL)
     if sel.LOGIN_PATH in page.url:
         return False
     return page.locator(sel.GUEST_LOGIN_LINK).count() == 0
 
 
 def login(page: Page, username: str, password: str) -> None:
-    page.goto(sel.LOGIN_URL, wait_until="domcontentloaded")
+    goto(page, sel.LOGIN_URL)
     _stop_if_captcha(page)
 
     page.locator(sel.LOGIN_OPTION_EMAIL).first.click()

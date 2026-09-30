@@ -69,3 +69,36 @@ def test_session_is_valid(browser):
     context, page = fake_portal(browser, HOME_GUEST)
     assert not session_is_valid(page)
     context.close()
+
+
+def test_network_error_on_load_is_retried_once(browser):
+    from src.portal.browser import goto
+
+    context = browser.new_context()
+    calls = {"n": 0}
+
+    def flaky(route):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            route.abort("internetdisconnected")
+        else:
+            route.fulfill(body="<p>ok</p>", content_type="text/html; charset=utf-8")
+
+    context.route(f"{sel.BASE_URL}/**", flaky)
+    page = context.new_page()
+    goto(page, sel.LOGIN_URL)
+    assert calls["n"] == 2
+    context.close()
+
+
+def test_error_description_hides_secrets():
+    from playwright.sync_api import Error as PlaywrightError
+
+    from src.portal.browser import describe_error
+
+    msg = describe_error(PlaywrightError("Locator.fill: algo con clave-secreta y yo@example.com\nCall log: ..."),
+                         "yo@example.com", "clave-secreta")
+    assert "clave-secreta" not in msg and "yo@example.com" not in msg
+
+    net = describe_error(PlaywrightError("Page.goto: net::ERR_NETWORK_CHANGED at https://x"))
+    assert "ERR_NETWORK_CHANGED" in net and "Vuelve a probar" in net
