@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- Página de login FALSA y mínima: reproduce solo los ids y el comportamiento
+     que usa src/portal/auth.py (tarjeta → formulario → resultado). No es HTML del portal. -->
+<html lang="es">
+<body>
+  <article class="navigation-section-widget-collection-item" onclick="document.getElementById('form').hidden = false">
+    <h3>Correo y contraseña</h3>
+  </article>
+  <article class="navigation-section-widget-collection-item"><h3>No identificado</h3></article>
+
+  <div id="form" hidden>
+    <input id="ContentFixedSection_uLogin_txtIdentificador" type="text">
+    <input id="ContentFixedSection_uLogin_txtContrasena" type="password">
+    <input id="ContentFixedSection_uLogin_chkNoCerrarSesion" type="checkbox">
+    <button id="ContentFixedSection_uLogin_btnLogin" type="button" onclick="submitLogin()">Iniciar sesión</button>
+  </div>
+  <div id="ContentFixedSection_uLogin_uLoginVerification_uplContenedor"></div>
+  <div id="ContentFixedSection_uLoginVerification_uplContenedor"></div>
+  <p id="msg"></p>
+
+  <script>
+    // El comportamiento lo decide el usuario de prueba
+    function submitLogin() {
+      const user = document.getElementById("ContentFixedSection_uLogin_txtIdentificador").value;
+      const keep = document.getElementById("ContentFixedSection_uLogin_chkNoCerrarSesion").checked;
+      if (user === "ok@example.com" && keep) {
+        location.href = "/DeportesWeb/Home";
+      } else if (user === "verifica@example.com") {
+        document.getElementById("ContentFixedSection_uLoginVerification_uplContenedor").textContent = "Introduce el código";
+      } else {
+        document.getElementById("msg").textContent = "Intento de inicio de sesión no válido";
+      }
+    }
+  </script>
+</body>
+</html>

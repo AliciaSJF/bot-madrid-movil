@@ -114,6 +114,7 @@ code { font-size: .9em; }
   font-size: 2.5rem; font-weight: 700; text-decoration: none;
 }
 .avatar-sm { width: 40px; height: 40px; border-radius: 12px; font-size: 1.1rem; }
+.avatar-md { width: 56px; height: 56px; border-radius: 16px; font-size: 1.5rem; flex: none; }
 .avatar-add {
   background: transparent; color: var(--muted);
   border: 2px dashed var(--line); font-weight: 400;
@@ -217,6 +218,7 @@ form:has(input[name="mode"][value="observar"]:checked) .only-observe { display: 
 .btn-primary { background: var(--accent); color: var(--accent-text); width: 100%; }
 .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
 .btn-secondary { background: transparent; color: var(--danger); border: 1px solid var(--line); }
+.btn-ghost { width: 100%; background: transparent; color: var(--text); border: 1px solid var(--line); }
 .btn-link { background: none; color: var(--muted); text-decoration: underline; font-weight: 400; }
 
 /* --- avisos --- */
@@ -249,5 +251,21 @@ form:has(input[name="mode"][value="observar"]:checked) .only-observe { display: 
 .badge-fallido, .badge-expirado { background: var(--danger-soft); color: var(--danger); }
 .badge-cancelado { background: var(--line); color: var(--muted); }
 .badge-test { background: var(--warn-soft); color: var(--warn); }
+
+/* --- perfil --- */
+
+.account { padding: 16px; margin-bottom: 12px; }
+.account p { margin: 0 0 8px; }
+.account form { margin-top: 12px; }
+.account .notice { margin-top: 8px; }
+.account-head { display: flex; align-items: center; gap: 14px; }
+.account-head p { margin: 0; }
+.account-name { font-weight: 700; font-size: 1.15rem; }
+.account-user { font-size: .9rem; overflow-wrap: anywhere; }
+.section-title { font-size: 1rem; margin: 0; }
+.badge-portal-ok { background: var(--ok-soft); color: var(--ok); }
+.badge-portal-rechazado, .badge-portal-error { background: var(--danger-soft); color: var(--danger); }
+.badge-portal-verificacion { background: var(--warn-soft); color: var(--warn); }
+.badge-portal-sin_probar { background: var(--line); color: var(--muted); }
 
 .empty { text-align: center; padding: 32px 0; color: var(--muted); }

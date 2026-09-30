@@ -8,8 +8,9 @@ Contexto para Claude Code. Léelo entero antes de tocar código. Si algo de aqu�
 |---|---|
 | 1. Repo, entorno, `.gitignore`, estructura | ✅ hecho |
 | 2. Front básico: cuenta de casa, perfiles, reservar, mis reservas (sin portal) | ✅ hecho (rama `feat/front-perfiles`) |
-| 3. Login por CLI con Playwright | ⏳ siguiente |
-| 4–11 | pendiente |
+| 3. Login por CLI con Playwright | 🔶 hecho, falta probarlo con una cuenta real |
+| 4. Listar turnos / polideportivos | ⏳ siguiente: necesita capturas de las páginas con sesión |
+| 5–11 | pendiente |
 
 ## 1. Qué es y para qué
 
@@ -98,6 +99,14 @@ Esto es lo observado hasta ahora. Se irá ampliando; marca como **verificado** l
 - Éxito: la respuesta contiene un `pageRedirect` a `/DeportesWeb/Home`.
 - Fallo: la respuesta contiene el aviso "Intento de inicio de sesión no válido" y un ViewState nuevo.
 - Botón de login: `#ContentFixedSection_uLogin_btnLogin`.
+- **Verificado 2026-09-30 (página pública, sin enviar el formulario):**
+  - La página de login muestra tres tarjetas (`article.navigation-section-widget-collection-item`): "Correo y contraseña", "Sede electrónica" y "No identificado". El formulario aparece al pulsar la primera.
+  - Campos: `#ContentFixedSection_uLogin_txtIdentificador` (correo), `#ContentFixedSection_uLogin_txtContrasena`, casilla "No cerrar sesión" `#ContentFixedSection_uLogin_chkNoCerrarSesion` (el bot la marca).
+  - No hay captcha visible. Los paneles `…uLoginVerification_uplContenedor` existen vacíos; si se llenan, el bot lo trata como verificación pedida.
+  - Hay un banner de cookies; el bot no lo acepta.
+  - "No identificado" entra en `/DeportesWeb/Home` como invitada, pero sin opciones de uso libre, sala ni piscina: **los polideportivos por servicio solo se ven con sesión**.
+  - En Home como invitada aparece un enlace `__doPostBack(... 'IniciarSesion' ...)`. Se usa para detectar sesión caducada (sin verificar con sesión real).
+- Selectores centralizados en `src/portal/selectors.py`, cada uno marcado como verificado o no.
 - Existe un panel de verificación de login (`uLoginVerification`); no sabemos cuándo se activa. Vigilarlo, sobre todo al entrar desde un dispositivo nuevo (la Pi).
 - Tras un login fallido no reintentar en bucle: parar y avisar, para no bloquear la cuenta.
 
@@ -237,7 +246,9 @@ python -m playwright install chromium   # a partir del hito 2
 python -m scripts.cli --help
 python -m scripts.cli web              # http://127.0.0.1:8000
 python -m scripts.cli web --host 0.0.0.0 --reload   # verla desde el móvil en la misma red
-python -m scripts.cli login --user <perfil>   # hito 3
+python -m playwright install chromium        # una vez
+python -m scripts.cli login --perfil <nombre>  # prueba la conexión (un intento, sin bucles)
+python -m scripts.cli capturar --perfil <nombre> [/DeportesWeb/Home ...]  # guarda HTML en data/capturas/
 
 # tests
 pytest

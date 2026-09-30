@@ -67,8 +67,8 @@ def new_submit(
     )
     conn.commit()
     auth.set_current_profile(request.session, profile_id)
-    flash(request, f"Perfil «{form.display_name}» creado.")
-    return redirect("/reservas")
+    flash(request, f"Perfil «{form.display_name}» creado. Prueba la conexión con el portal.")
+    return redirect("/perfil")
 
 
 def _first_free_color(conn: sqlite3.Connection) -> str:

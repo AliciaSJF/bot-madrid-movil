@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from src.api.deps import Redirect, redirect
-from src.api.routers import booking, house, jobs, profiles, pwa
+from src.api.routers import account, booking, house, jobs, profiles, pwa
 from src.api.templating import STATIC_DIR
 from src.config import Settings, get_settings
 from src.db.database import connect, get_setting, init_db, set_setting
@@ -36,7 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-    for router in (pwa.router, house.router, profiles.router, booking.router, jobs.router):
+    for router in (pwa.router, house.router, profiles.router, account.router, booking.router, jobs.router):
         app.include_router(router)
 
     @app.exception_handler(Redirect)

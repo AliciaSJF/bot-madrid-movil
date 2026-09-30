@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS profiles (
     portal_username     TEXT NOT NULL,
     portal_password_enc TEXT NOT NULL,
     telegram_chat_id    TEXT,
+    portal_status       TEXT NOT NULL DEFAULT 'sin_probar',
+    portal_checked_at   TEXT,
+    portal_message      TEXT,
     created_at          TEXT NOT NULL
 );
 
@@ -36,6 +39,15 @@ CREATE INDEX IF NOT EXISTS idx_jobs_profile ON jobs(profile_id, slot_at);
 """
 
 
+# Columnas añadidas después de crear la tabla: (tabla, columna, definición).
+# CREATE TABLE IF NOT EXISTS no las añade en una BD que ya existía.
+MIGRATIONS = [
+    ("profiles", "portal_status", "TEXT NOT NULL DEFAULT 'sin_probar'"),
+    ("profiles", "portal_checked_at", "TEXT"),
+    ("profiles", "portal_message", "TEXT"),
+]
+
+
 def db_path(data_dir: Path) -> Path:
     return data_dir / "bot.db"
 
@@ -52,8 +64,17 @@ def init_db(data_dir: Path) -> None:
     conn = connect(data_dir)
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
+        conn.commit()
     finally:
         conn.close()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, column, definition in MIGRATIONS:
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def get_setting(conn: sqlite3.Connection, key: str) -> str | None:

@@ -1,0 +1,35 @@
+{% extends "app_base.html" %}
+{% block title %}Perfil{% endblock %}
+{% block heading %}Perfil{% endblock %}
+{% block content %}
+<section class="card account">
+  <div class="account-head">
+    <span class="avatar avatar-md" style="--c: {{ profile.color }}">{{ profile.initial }}</span>
+    <div>
+      <p class="account-name">{{ profile.display_name }}</p>
+      <p class="muted account-user">{{ profile.portal_username }}</p>
+    </div>
+  </div>
+</section>
+
+<section class="card account">
+  <div class="job-head">
+    <h2 class="section-title">Portal de Deportes</h2>
+    <span class="badge badge-portal-{{ profile.portal_status }}">{{ status_label }}</span>
+  </div>
+  {% if profile.portal_message %}<p>{{ profile.portal_message }}</p>{% endif %}
+  {% if profile.portal_checked_at %}<p class="hint">Última prueba: {{ profile.portal_checked_at | slot }}</p>{% endif %}
+
+  {% if profile.portal_status == "rechazado" %}
+  <p class="notice">Revisa el usuario y la contraseña antes de volver a probar: varios intentos fallidos pueden bloquear la cuenta.</p>
+  {% elif profile.portal_status == "verificacion" %}
+  <p class="notice">Entra una vez a mano en deportesweb.madrid.es desde el navegador y vuelve a probar.</p>
+  {% endif %}
+
+  <form method="post" action="/perfil/probar" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Probando… (unos segundos)'">
+    <button class="btn btn-primary" type="submit">Probar conexión</button>
+  </form>
+</section>
+
+<a class="btn btn-ghost" href="/perfiles">Cambiar de perfil</a>
+{% endblock %}

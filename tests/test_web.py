@@ -85,7 +85,7 @@ def test_login_with_house_password(client, settings):
 def test_new_profile_stores_password_encrypted(client, settings):
     setup_house(client)
     r = create_profile(client)
-    assert r.headers["location"] == "/reservas"
+    assert r.headers["location"] == "/perfil"
 
     raw = db_path(settings.data_dir).read_bytes()
     assert PORTAL_PASSWORD.encode() not in raw
@@ -170,8 +170,29 @@ def test_all_screens_render(client, settings):
     assert client.get("/perfiles/nuevo").status_code == 200
     create_profile(client)
     book(client, settings)
-    for url in ("/perfiles", "/reservar", "/reservas"):
+    for url in ("/perfiles", "/perfil", "/reservar", "/reservas"):
         assert client.get(url).status_code == 200, url
+
+
+def test_account_page_and_connection_check(client, monkeypatch):
+    from src.api.routers import account
+    from src.core.connection import ConnectionCheck
+
+    setup_house(client)
+    create_profile(client)
+    assert "Sin probar" in client.get("/perfil").text
+
+    def fake_check(conn, _settings, profile_id):
+        from src.db import profiles as profiles_repo
+
+        profiles_repo.set_portal_status(conn, profile_id, "ok", "Sesión iniciada correctamente.")
+        conn.commit()
+        return ConnectionCheck("ok", "Sesión iniciada correctamente.")
+
+    monkeypatch.setattr(account, "check_connection", fake_check)
+    assert client.post("/perfil/probar").headers["location"] == "/perfil"
+    page = client.get("/perfil").text
+    assert "Conectada" in page and "Conexión correcta" in page
 
 
 def test_pwa_files_are_served(client):
