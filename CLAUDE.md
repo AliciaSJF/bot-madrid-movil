@@ -7,8 +7,9 @@ Contexto para Claude Code. Léelo entero antes de tocar código. Si algo de aqu�
 | Hito | Estado |
 |---|---|
 | 1. Repo, entorno, `.gitignore`, estructura | ✅ hecho |
-| 2. Front básico: cuenta de casa, perfiles, reservar, mis reservas (sin portal) | ⏳ siguiente (rama `feat/front-perfiles`) |
-| 3–11 | pendiente |
+| 2. Front básico: cuenta de casa, perfiles, reservar, mis reservas (sin portal) | ✅ hecho (rama `feat/front-perfiles`) |
+| 3. Login por CLI con Playwright | ⏳ siguiente |
+| 4–11 | pendiente |
 
 ## 1. Qué es y para qué
 
@@ -126,6 +127,13 @@ Esto es lo observado hasta ahora. Se irá ampliando; marca como **verificado** l
 - Sesión del portal: guardar `storage_state` de Playwright por usuario, comprobar si sigue válida antes de cada uso y volver a iniciar sesión solo si caducó, con antelación al momento crítico.
 - **Layout de código (hito 1):** `src/` es el paquete raíz (`from src.portal import ...`) y los scripts se lanzan como módulo desde la raíz del repo (`python -m scripts.cli`). No hace falta instalar el proyecto como paquete; `pytest` añade la raíz al path (`pythonpath = ["."]` en `pyproject.toml`).
 - **Front:** FastAPI + Jinja, instalable como PWA. Descartados Streamlit (malo en móvil y con login/perfiles) y React/React Native (dos proyectos y dos lenguajes para 2 usuarias; la PWA + Telegram cubre el "como una app"). La lógica queda separada de las pantallas para poder añadir una API JSON y una app nativa si algún día hace falta.
+- **Front (hito 2):**
+  - Formularios HTML normales (POST y redirección), sin HTMX ni JS salvo un `confirm()` al cancelar. HTMX se añadirá cuando haga falta refresco parcial (estados en vivo, turnos reales).
+  - La contraseña de casa se crea en la primera visita (`/configurar`), se guarda con scrypt de la stdlib y la sesión es una cookie firmada de 60 días. El secreto de la cookie se genera solo y se guarda en la tabla `app_settings`.
+  - SQLite con `sqlite3` de la stdlib (sin ORM), esquema en `src/db/database.py`.
+  - PWA: `manifest.webmanifest` y `sw.js` servidos desde la raíz; el service worker no cachea nada a propósito.
+  - Si `DRY_RUN=true` en el servidor, todas las programaciones se guardan en modo prueba aunque el formulario diga otra cosa.
+  - El polideportivo es texto libre con sugerencias de los ya usados, hasta que el hito 4 lea la lista real del portal.
 - **Configuración (hito 1):** `pydantic-settings` lee `.env` / variables de entorno (`src/config.py`). Las dependencias de la web, el scheduler y Telegram se añadirán en su hito, no antes.
 
 ## 7. Arquitectura
@@ -172,7 +180,7 @@ Estados de un Job en modo `observar`: `pendiente` → `vigilando` → `plaza_lib
 Construir en este orden y probar cada hito antes de pasar al siguiente. El front se adelanta porque sus primeras pantallas no dependen del portal:
 
 1. Repo, entorno, `.gitignore`, estructura. ✅
-2. Front básico (FastAPI + Jinja, PWA): cuenta de casa, selector de perfiles, crear perfil con credenciales cifradas, formulario "Reservar" que guarda la programación, "Mis reservas" con estado y cancelar. Todavía no habla con el portal.
+2. ✅ Front básico (FastAPI + Jinja, PWA): cuenta de casa, selector de perfiles, crear perfil con credenciales cifradas, formulario "Reservar" que guarda la programación, "Mis reservas" con estado y cancelar. Todavía no habla con el portal.
 3. Login por CLI con Playwright y sesión reutilizable, usando las credenciales del perfil.
 4. Listar turnos de un centro y un servicio (solo lectura).
 5. Reservar con `--dry-run`.
@@ -218,6 +226,8 @@ python -m playwright install chromium   # a partir del hito 2
 
 # CLI
 python -m scripts.cli --help
+python -m scripts.cli web              # http://127.0.0.1:8000
+python -m scripts.cli web --host 0.0.0.0 --reload   # verla desde el móvil en la misma red
 python -m scripts.cli login --user <perfil>   # hito 3
 
 # tests

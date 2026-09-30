@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#0f766e"/>
+  <!-- Cronómetro: anillo, botón y aguja -->
+  <rect x="226" y="92" width="60" height="44" rx="10" fill="#fff"/>
+  <circle cx="256" cy="286" r="128" fill="none" stroke="#fff" stroke-width="40"/>
+  <path d="M256 286 L256 206" stroke="#fff" stroke-width="32" stroke-linecap="round"/>
+  <circle cx="256" cy="286" r="22" fill="#fff"/>
+</svg>

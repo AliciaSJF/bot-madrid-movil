@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Perfiles{% endblock %}
+{% block body_class %}centered{% endblock %}
+{% block content %}
+<div class="profiles">
+  <h1>{% if profiles %}¿Quién va a entrenar?{% else %}Crea tu perfil{% endif %}</h1>
+  {% if not profiles %}<p class="muted">Cada perfil usa su propia cuenta de la Comunidad de Madrid.</p>{% endif %}
+
+  <div class="profile-grid">
+    {% for p in profiles %}
+    <form method="post" action="/perfiles/{{ p.id }}/elegir">
+      <button class="profile-card{% if p.id == current_id %} is-current{% endif %}" type="submit">
+        <span class="avatar" style="--c: {{ p.color }}">{{ p.initial }}</span>
+        <span class="profile-name">{{ p.display_name }}</span>
+      </button>
+    </form>
+    {% endfor %}
+    <a class="profile-card" href="/perfiles/nuevo">
+      <span class="avatar avatar-add" aria-hidden="true">+</span>
+      <span class="profile-name">Añadir perfil</span>
+    </a>
+  </div>
+
+  <form method="post" action="/salir" class="logout">
+    <button class="btn btn-link" type="submit">Salir en este dispositivo</button>
+  </form>
+</div>
+{% endblock %}

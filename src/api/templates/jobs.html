@@ -1,0 +1,35 @@
+{% extends "app_base.html" %}
+{% block title %}Mis reservas{% endblock %}
+{% block heading %}Mis reservas{% endblock %}
+{% block content %}
+<p class="notice">De momento el bot solo guarda las programaciones: todavía no se conecta al portal.</p>
+
+{% if not jobs %}
+<div class="empty">
+  <p>No tienes nada programado.</p>
+  <a class="btn btn-primary" href="/reservar">Programar una reserva</a>
+</div>
+{% endif %}
+
+<ul class="cards">
+  {% for job in jobs %}
+  <li class="card job{% if not job.is_active %} is-done{% endif %}">
+    <div class="job-head">
+      <span class="job-service">{{ SERVICES[job.service] }}</span>
+      <span class="badge badge-{{ job.status }}">{{ STATUS_LABELS[job.status] }}</span>
+    </div>
+    <p class="job-when">{{ job.slot_at | slot }}</p>
+    <p class="job-center">{{ job.center }}</p>
+    <p class="job-meta">
+      {{ MODES[job.mode] }}{% if job.mode == "observar" and job.on_free %} · {{ ON_FREE[job.on_free] | lower }}{% endif %}
+      {% if job.dry_run %}<span class="badge badge-test">Prueba</span>{% endif %}
+    </p>
+    {% if job.is_active %}
+    <form method="post" action="/reservas/{{ job.id }}/cancelar" onsubmit="return confirm('¿Cancelar esta programación?')">
+      <button class="btn btn-secondary" type="submit">Cancelar</button>
+    </form>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}

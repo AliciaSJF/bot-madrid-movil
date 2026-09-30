@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Configurar{% endblock %}
+{% block body_class %}centered{% endblock %}
+{% block content %}
+<div class="auth">
+  <img class="logo" src="/static/icon.svg" alt="" width="72" height="72">
+  <h1>Bienvenida</h1>
+  <p class="muted">Crea la contraseña de casa. Se pedirá una vez en cada dispositivo.</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" class="stack">
+    <label>Contraseña de casa
+      <input type="password" name="password" autocomplete="new-password" minlength="{{ min_length }}" required autofocus>
+    </label>
+    <label>Repítela
+      <input type="password" name="password2" autocomplete="new-password" minlength="{{ min_length }}" required>
+    </label>
+    <button class="btn btn-primary" type="submit">Crear y entrar</button>
+  </form>
+</div>
+{% endblock %}

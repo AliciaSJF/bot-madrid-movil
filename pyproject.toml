@@ -5,18 +5,25 @@ description = "Bot personal de reservas de uso libre en polideportivos de Madrid
 readme = "README.md"
 requires-python = ">=3.12"
 # Solo lo necesario para los hitos en curso; el resto se añade en su hito
-# (fastapi/jinja/htmx en el 8, apscheduler en el 6, telegram en el 9).
+# (apscheduler en el 7, telegram en el 10).
 dependencies = [
     "playwright>=1.47",
     "cryptography>=43",
     "pydantic-settings>=2.5",
     # zoneinfo no trae base de datos de zonas en Windows ni en imágenes slim
     "tzdata>=2024.1",
+    # Web: uvicorn sin [standard] para no arrastrar compilados pesados a la Pi
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "itsdangerous>=2.2",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
+    "httpx2>=2.13",
 ]
 
 [build-system]

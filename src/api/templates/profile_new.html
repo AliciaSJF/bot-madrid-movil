@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Nuevo perfil{% endblock %}
+{% block header %}
+<header class="topbar">
+  <a class="back" href="/perfiles" aria-label="Volver a perfiles">‹</a>
+  <h1 class="topbar-title">Nuevo perfil</h1>
+</header>
+{% endblock %}
+{% block content %}
+{% if key_missing %}
+<p class="error" role="alert">Falta <code>FERNET_KEY</code> en el <code>.env</code> del servidor. Sin ella no se pueden guardar credenciales.</p>
+{% endif %}
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+
+<form method="post" class="stack">
+  <label>Nombre
+    <input type="text" name="display_name" value="{{ values.display_name or '' }}" maxlength="20" autocomplete="off" required autofocus>
+  </label>
+
+  <fieldset>
+    <legend>Color</legend>
+    <div class="swatches">
+      {% for c in colors %}
+      <label class="swatch" style="--c: {{ c }}">
+        <input type="radio" name="color" value="{{ c }}" {% if values.color == c %}checked{% endif %}>
+        <span class="visually-hidden">Color {{ loop.index }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  <fieldset class="card">
+    <legend>Cuenta de la Comunidad de Madrid</legend>
+    <p class="hint">La que usas en deportesweb.madrid.es. La contraseña se guarda cifrada y no se vuelve a mostrar.</p>
+    <label>Usuario del portal
+      <input type="text" name="portal_username" value="{{ values.portal_username or '' }}" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+    </label>
+    <label>Contraseña del portal
+      <input type="password" name="portal_password" autocomplete="new-password" required>
+    </label>
+  </fieldset>
+
+  <button class="btn btn-primary" type="submit" {% if key_missing %}disabled{% endif %}>Crear perfil</button>
+</form>
+{% endblock %}

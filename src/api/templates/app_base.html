@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{# Pantallas con un perfil elegido: cabecera con el perfil y barra inferior #}
+{% block body_class %}with-nav{% endblock %}
+
+{% block header %}
+<header class="topbar">
+  <h1 class="topbar-title">{% block heading %}{% endblock %}</h1>
+  <a class="avatar avatar-sm" href="/perfiles" style="--c: {{ profile.color }}" aria-label="Cambiar de perfil ({{ profile.display_name }})">{{ profile.initial }}</a>
+</header>
+{% endblock %}
+
+{% block nav %}
+<nav class="bottom-nav" aria-label="Principal">
+  <a href="/reservar" {% if nav == "reservar" %}aria-current="page"{% endif %}>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    Reservar
+  </a>
+  <a href="/reservas" {% if nav == "reservas" %}aria-current="page"{% endif %}>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>
+    Mis reservas
+  </a>
+  <a href="/perfiles">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg>
+    Perfiles
+  </a>
+</nav>
+{% endblock %}

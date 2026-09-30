@@ -12,5 +12,5 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 cp .env.example .env             # y rellenar FERNET_KEY
 pytest
-python -m scripts.cli --help
+python -m scripts.cli web      # abre http://127.0.0.1:8000
 ```
