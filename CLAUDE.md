@@ -134,6 +134,7 @@ Esto es lo observado hasta ahora. Se irá ampliando; marca como **verificado** l
   - PWA: `manifest.webmanifest` y `sw.js` servidos desde la raíz; el service worker no cachea nada a propósito.
   - Si `DRY_RUN=true` en el servidor, todas las programaciones se guardan en modo prueba aunque el formulario diga otra cosa.
   - El polideportivo es texto libre con sugerencias de los ya usados, hasta que el hito 4 lea la lista real del portal.
+- **Estructura de `src/api/`:** los routers solo leen el formulario, llaman a `forms` / `db` y renderizan. La validación va en `forms.py` (se prueba sin levantar la web) y el acceso a datos en `src/db/`. Una pantalla nueva = un router nuevo registrado en `app.py`.
 - **Configuración (hito 1):** `pydantic-settings` lee `.env` / variables de entorno (`src/config.py`). Las dependencias de la web, el scheduler y Telegram se añadirán en su hito, no antes.
 
 ## 7. Arquitectura
@@ -153,6 +154,14 @@ bot-madrid-movil/
 │   ├── core/       # jobs, estrategias (alternativas / observar), reintentos, límites
 │   ├── worker/     # scheduler y ejecución
 │   ├── api/        # FastAPI, plantillas Jinja, estáticos, PWA
+│   │   ├── app.py         # create_app(): middleware, estáticos y routers (nada de lógica)
+│   │   ├── deps.py        # dependencias: ajustes, conexión BD, require_house → require_profile
+│   │   ├── auth.py        # contraseña de casa (scrypt) y estado de la sesión del navegador
+│   │   ├── forms.py       # dataclasses de formularios con validate()
+│   │   ├── templating.py  # Jinja: filtros, globals, render() y flash()
+│   │   ├── routers/       # una pantalla por archivo: house, profiles, booking, jobs, pwa
+│   │   ├── templates/
+│   │   └── static/
 │   ├── notify/     # Telegram
 │   └── db/         # modelos, migraciones, cifrado de credenciales
 ├── tests/          # con fixtures de HTML/respuestas SANEADAS

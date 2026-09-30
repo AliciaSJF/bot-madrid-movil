@@ -165,6 +165,15 @@ def test_cancel_only_own_active_jobs(client, settings):
     assert "Cancelado" in client.get("/reservas").text
 
 
+def test_all_screens_render(client, settings):
+    setup_house(client)
+    assert client.get("/perfiles/nuevo").status_code == 200
+    create_profile(client)
+    book(client, settings)
+    for url in ("/perfiles", "/reservar", "/reservas"):
+        assert client.get(url).status_code == 200, url
+
+
 def test_pwa_files_are_served(client):
     assert client.get("/manifest.webmanifest").headers["content-type"].startswith("application/manifest+json")
     assert client.get("/sw.js").status_code == 200
