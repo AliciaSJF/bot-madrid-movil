@@ -4,6 +4,7 @@ from src.portal.auth import SessionResult, ensure_session
 from src.portal.cancel import CancelResult, cancel_reservation
 from src.portal.centers import PortalCenter, fetch_centers
 from src.portal.errors import (
+    BrowserClosed,
     CaptchaDetected,
     LoginRejected,
     PortalError,
@@ -13,6 +14,7 @@ from src.portal.errors import (
 from src.portal.slots import PortalSlot, fetch_slots, fetch_slots_many
 
 __all__ = [
+    "BrowserClosed",
     "CancelResult",
     "CaptchaDetected",
     "LoginRejected",

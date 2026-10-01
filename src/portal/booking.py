@@ -23,13 +23,14 @@ from pathlib import Path
 
 from playwright.sync_api import BrowserContext, Page
 from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from src.config import Settings
 from src.portal import selectors as sel
 from src.portal.auth import login, session_is_valid
 from src.portal.browser import describe_error, goto, open_context, session_file
 from src.portal.centers import open_service
-from src.portal.errors import PortalError
+from src.portal.errors import BrowserClosed, PortalError
 from src.portal.slots import open_center, select_day
 
 # Observado el 2026-09-30: en el minuto de apertura el portal tardó 28 s en responder.
@@ -47,6 +48,19 @@ IN_ASYNC_POSTBACK_JS = """() => {
   catch (e) { return false; }
 }"""
 CONFIRM_RESULT_TIMEOUT_S = 30
+# Al abrir el carrito, cuánto se espera al botón de confirmar (un carrito caducado podría no traerlo)
+CART_READY_TIMEOUT_MS = 20_000
+CLOSED_MESSAGE = "Se cerró el navegador del bot a mitad de la reserva."
+
+
+def _is_closed(exc: PlaywrightError) -> bool:
+    return "has been closed" in str(exc)
+
+
+def _portal_error(exc: PlaywrightError, *secrets: str) -> PortalError:
+    if _is_closed(exc):
+        return BrowserClosed(CLOSED_MESSAGE)
+    return PortalError(describe_error(exc, *secrets))
 MONTHS_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
              "septiembre", "octubre", "noviembre", "diciembre"]
 MONEY = re.compile(r"(\d{1,4}(?:\.\d{3})*,\d{2})\s*€")
@@ -65,6 +79,8 @@ class AddOutcome:
     in_cart: bool
     message: str  # aviso del portal si no se añadió (vacío si no hubo)
     page_broken: bool = False  # la página no tiene la lista de turnos: hay que volver a entrar
+    # El portal habla del carrito (aviso, o el contador ha subido): hay que abrirlo y ver qué tiene
+    check_cart: bool = False
 
 
 @dataclass(frozen=True)
@@ -123,7 +139,7 @@ class BookingSession:
         try:
             return action()
         except PlaywrightError as exc:
-            raise PortalError(describe_error(exc)) from None
+            raise _portal_error(exc) from None
 
     # --- preparación (antes de la hora) ----------------------------------------
 
@@ -140,7 +156,7 @@ class BookingSession:
         try:
             return run()
         except PlaywrightError as exc:  # el mensaje podría incluir lo escrito: se tapa
-            raise PortalError(describe_error(exc, username, password)) from None
+            raise _portal_error(exc, username, password) from None
 
     def prepare(self, service: str, center_id: int, day: date) -> None:
         """Abre el centro y el día del turno, listo para pulsar."""
@@ -200,14 +216,19 @@ class BookingSession:
 
         def run() -> AddOutcome:
             if not self._wait_list_ready():
-                return AddOutcome(False, "La lista de turnos no ha vuelto a cargar.", page_broken=True)
+                if sel.CART_PATH in self.page.url:  # el clic anterior sí entró: el portal acabó en el carrito
+                    return AddOutcome(False, "El portal ha acabado en el carrito.", check_cart=True)
+                return AddOutcome(False, "La lista de turnos no ha vuelto a cargar.", page_broken=True,
+                                  check_cart=self._cart_grew())
             li, state = self._slot_link(at, activity)
             if li is None:
-                return AddOutcome(False, "El turno no aparece en la lista del portal.", page_broken=True)
+                return AddOutcome(False, "El turno no aparece en la lista del portal.", page_broken=True,
+                                  check_cart=self._cart_grew())
             if not state.selectable:
                 return AddOutcome(False, "El portal muestra el turno sin plazas.")
             # Sin esperar a que la página termine de cambiar: si no, con el portal saturado el bot se
             # queda ciego hasta que responde (24 s el 30/09). Lo que pasa se vigila en el bucle.
+            self._cart_before = self.cart_count()
             li.locator("a").first.click(no_wait_after=True)
             clicked = datetime.now()
             deadline = clicked + timedelta(seconds=CLICK_RESULT_TIMEOUT_S)
@@ -218,25 +239,53 @@ class BookingSession:
                     return AddOutcome(True, "")
                 alerts = self._visible_alerts()
                 if alerts:
-                    return AddOutcome(False, re.sub(r"\s+", " ", alerts[0])[:200])
+                    text = re.sub(r"\s+", " ", alerts[0])[:200]
+                    return AddOutcome(False, text, check_cart=bool(sel.CART_ALERT.search(text)))
                 busy = self._in_postback()
                 if not busy and (datetime.now() - clicked).total_seconds() > CLICK_IDLE_S:
-                    return AddOutcome(False, "El portal no hizo nada al pulsar el turno.")
+                    # El 30/09 a las 18:00 el turno entró en el carrito sin que la página fuera a él
+                    return AddOutcome(False, "El portal no hizo nada al pulsar el turno.", check_cart=self._cart_grew())
                 self.page.wait_for_timeout(100)
-            return AddOutcome(False, f"El portal no respondió en {CLICK_RESULT_TIMEOUT_S} s.")
+            return AddOutcome(False, f"El portal no respondió en {CLICK_RESULT_TIMEOUT_S} s.", check_cart=self._cart_grew())
 
         return self._guard(run)
 
+    def cart_count(self) -> int:
+        """Elementos en el carrito según el contador de la cabecera (0 si no se ve o no se puede leer)."""
+        try:
+            badge = self.page.locator(sel.CART_BADGE)
+            if badge.count() == 0:
+                return 0
+            digits = re.sub(r"\D", "", badge.first.inner_text())
+            return int(digits) if digits else 0
+        except PlaywrightError as exc:
+            if _is_closed(exc):
+                raise BrowserClosed(CLOSED_MESSAGE) from None
+            return 0  # la página está cambiando
+
+    def _cart_grew(self) -> bool:
+        return self.cart_count() > getattr(self, "_cart_before", 0)
+
     def open_cart(self) -> bool:
-        """Abre el carrito desde el enlace de la cabecera. Devuelve False si no se pudo."""
+        """Abre el carrito desde el enlace de la cabecera (o sigue en él si ya está). Devuelve True si
+        se ve el botón de confirmar; False si no se pudo abrir o el carrito no está para pagar."""
 
         def run() -> bool:
-            link = self.page.locator(sel.HEADER_CART_LINK)
-            if link.count() == 0:
+            if sel.CART_PATH not in self.page.url:
+                link = self.page.locator(sel.HEADER_CART_LINK)
+                if link.count() == 0:
+                    return False
+                link.first.click()
+                try:
+                    self.page.wait_for_url(f"**{sel.CART_PATH}**")
+                except PlaywrightTimeoutError:
+                    self._capture("carrito_no_abre")
+                    return False
+            try:
+                self.page.locator(sel.CART_CONFIRM_BUTTON).wait_for(timeout=CART_READY_TIMEOUT_MS)
+            except PlaywrightTimeoutError:
+                self._capture("carrito_sin_confirmar")
                 return False
-            link.first.click()
-            self.page.wait_for_url(f"**{sel.CART_PATH}**")
-            self.page.locator(sel.CART_CONFIRM_BUTTON).wait_for()
             return True
 
         return self._guard(run)
@@ -248,8 +297,10 @@ class BookingSession:
             try:
                 if not self._in_postback() and self.page.locator(sel.SLOT_LISTS).count() > 0:
                     return True
-            except PlaywrightError:
-                pass  # navegando: seguir esperando
+            except PlaywrightError as exc:
+                if _is_closed(exc):
+                    raise
+                # navegando: seguir esperando
             self.page.wait_for_timeout(200)
         return False
 
@@ -258,13 +309,17 @@ class BookingSession:
         no hay nada que leer todavía: no es un error."""
         try:
             return [t.strip() for t in self.page.locator(sel.VISIBLE_ALERTS).all_inner_texts() if t.strip()]
-        except PlaywrightError:
+        except PlaywrightError as exc:
+            if _is_closed(exc):
+                raise
             return []
 
     def _in_postback(self) -> bool:
         try:
             return bool(self.page.evaluate(IN_ASYNC_POSTBACK_JS))
-        except PlaywrightError:  # la página está navegando: sigue ocupado
+        except PlaywrightError as exc:  # la página está navegando: sigue ocupado
+            if _is_closed(exc):
+                raise
             return True
 
     def server_clock_offset(self) -> float | None:

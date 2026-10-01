@@ -17,5 +17,9 @@ class CaptchaDetected(PortalError):
     """Hay un captcha. El bot no lo intenta resolver: para y avisa."""
 
 
+class BrowserClosed(PortalError):
+    """Se cerró el navegador (o la ventana) a mitad: no tiene sentido seguir intentándolo."""
+
+
 class SessionExpired(PortalError):
     """La sesión guardada ya no vale: hay que volver a iniciar sesión."""

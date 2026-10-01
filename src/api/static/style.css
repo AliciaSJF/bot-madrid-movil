@@ -277,7 +277,7 @@ form:has(input[name="mode"][value="observar"]:checked) .only-observe { display: 
 .job-when { font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .job-center { color: var(--muted); }
 .job-meta { color: var(--muted); font-size: .875rem; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.job form { margin-top: 10px; }
+.job .job-actions form { margin-top: 10px; }
 .job.is-done { opacity: .7; }
 
 .badge {
@@ -408,5 +408,27 @@ input.search {
 .badge-portal-rechazado, .badge-portal-error { background: var(--danger-soft); color: var(--danger); }
 .badge-portal-verificacion { background: var(--warn-soft); color: var(--warn); }
 .badge-portal-sin_probar { background: var(--line); color: var(--muted); }
+
+/* --- mis reservas: filtros y acciones --- */
+
+.filters {
+  display: flex; gap: 8px; overflow-x: auto; margin: 0 -16px 14px; padding: 2px 16px 6px;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.filters::-webkit-scrollbar { display: none; }
+.filter {
+  flex: none; display: inline-flex; align-items: center; gap: 6px;
+  min-height: 40px; padding: 0 14px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface);
+  color: var(--text); text-decoration: none; font-size: .9rem; font-weight: 600; white-space: nowrap;
+}
+.filter.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.filter-count { font-size: .75rem; opacity: .75; font-variant-numeric: tabular-nums; }
+.list-title { font-size: .85rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 18px 0 8px; }
+.list-title:first-of-type { margin-top: 0; }
+.bulk { margin-bottom: 12px; }
+.job-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.job-actions form { margin-top: 10px; }
+.btn-delete { min-height: var(--tap); padding: 0 8px; color: var(--muted); }
 
 .empty { text-align: center; padding: 32px 0; color: var(--muted); }

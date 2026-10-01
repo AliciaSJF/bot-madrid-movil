@@ -115,6 +115,12 @@ lists => lists.map(ul => {
 CART_PATH = "/DeportesWeb/Modulos/VentaServicios/CarritoConfirmar"
 # Enlace al carrito en la cabecera (verificado 2026-09-30): pulsarlo sí funciona, abrir la URL a mano no
 HEADER_CART_LINK = "#aCarrito"
+# Número de elementos en el carrito (<span id="spnCarrito" class="badge">1</span>; sin elementos no
+# aparece). Verificado 2026-09-30: un turno pendiente que caducó seguía contando como 1.
+CART_BADGE = "#spnCarrito"
+# Cualquier aviso que hable del carrito (p. ej. «La operación no se puede realizar porque el carrito
+# ya está expirado.», verificado 2026-09-30) significa que hay que ir a mirar el carrito
+CART_ALERT = re.compile(r"carrito", re.IGNORECASE)
 # Mensaje al pulsar un turno que ya está en tu carrito o ya reservaste (verificado 2026-09-30):
 # «La sesión seleccionada no permite más de 1 reserva(s) por persona.»
 ALREADY_BOOKED_TEXT = "no permite más de"

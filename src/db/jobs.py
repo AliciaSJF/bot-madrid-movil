@@ -186,3 +186,69 @@ def list_attempts(conn: sqlite3.Connection, job_id: int) -> list[Attempt]:
         "SELECT at, action, result, message FROM attempts WHERE job_id = ? ORDER BY id", (job_id,)
     ).fetchall()
     return [Attempt(datetime.fromisoformat(r["at"]), r["action"], r["result"], r["message"]) for r in rows]
+
+
+# --- «Mis reservas»: filtros, orden y borrado -------------------------------------
+
+FILTERS = {
+    "proximas": "Próximas",
+    "programadas": "Programadas",
+    "conseguidas": "Conseguidas",
+    "fallidas": "Fallidas",
+    "pruebas": "Pruebas",
+    "anuladas": "Anuladas",
+    "todas": "Todas",
+}
+DEFAULT_FILTER = "proximas"
+
+# Se pueden borrar las programaciones terminadas que no son el registro de un pago real.
+# Las conseguidas («reservado», «revisar») no se borran; las que están en marcha se cancelan antes.
+DELETABLE_STATUSES = ("prueba_ok", "fallido", "cancelado", "expirado", "anulado", "avisado")
+
+
+def is_deletable(job: Job) -> bool:
+    return not job.is_active and job.status in DELETABLE_STATUSES
+
+
+def matches_filter(job: Job, name: str, now: datetime) -> bool:
+    if name == "proximas":
+        return job.slot_at > now
+    if name == "programadas":
+        return job.is_active
+    if name == "conseguidas":
+        return job.status in ("reservado", "revisar")
+    if name == "fallidas":
+        return job.status in ("fallido", "expirado")
+    if name == "pruebas":
+        return job.dry_run
+    if name == "anuladas":
+        return job.status in ("anulado", "cancelado")
+    return True  # «todas»
+
+
+def split_by_date(jobs: list[Job], now: datetime) -> tuple[list[Job], list[Job]]:
+    """(próximas, pasadas): las próximas de la más cercana a la más lejana; las pasadas de la más
+    reciente a la más antigua. Así lo primero que se ve es siempre lo más cercano a hoy."""
+    upcoming = sorted((j for j in jobs if j.slot_at > now), key=lambda j: (j.slot_at, j.id))
+    past = sorted((j for j in jobs if j.slot_at <= now), key=lambda j: (j.slot_at, j.id), reverse=True)
+    return upcoming, past
+
+
+def delete_job(conn: sqlite3.Connection, job_id: int, profile_id: int) -> bool:
+    """Borra una programación terminada del perfil (y su historial). No borra reservas conseguidas."""
+    job = get_job(conn, job_id)
+    if job is None or job.profile_id != profile_id or not is_deletable(job):
+        return False
+    # Las vigilancias creadas desde esta programación se quedan, sin el enlace
+    conn.execute("UPDATE jobs SET source_job_id = NULL WHERE source_job_id = ?", (job_id,))
+    conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))  # attempts: ON DELETE CASCADE
+    return True
+
+
+def delete_tests(conn: sqlite3.Connection, profile_id: int) -> int:
+    """Borra todas las pruebas terminadas del perfil. Devuelve cuántas."""
+    deleted = 0
+    for job in list_jobs(conn, profile_id):
+        if job.dry_run and delete_job(conn, job.id, profile_id):
+            deleted += 1
+    return deleted

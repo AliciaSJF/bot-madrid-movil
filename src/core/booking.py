@@ -2,8 +2,11 @@
 
 Cronología de un turno que abre a las T (T = inicio − 49 h):
     T − 60 s   el programador lanza run_booking: sesión (o login) y página del centro y día abierta
+               si el carrito ya tiene algo, se abre: si es este turno se paga; si no, aviso por Telegram
     T          pulsa el turno; si el portal no lo deja aún o no responde, refresca y reintenta
-    T + 25 s   se deja de intentar (o antes si el portal lo muestra completo)
+    T + 10 min se deja de intentar (o antes si el portal lo muestra completo)
+    aviso      si el portal habla del carrito (caducado, ya está en él…) o su contador sube, se abre
+               el carrito y, si es este turno, se sigue con él
     carrito    un solo elemento, que sea este turno, monedero con saldo ≥ total → «Confirmar la compra»
 
 Modo prueba: todo igual hasta T, pero no pulsa el turno (pulsarlo ya lo mete en el carrito);
@@ -141,16 +144,27 @@ def _run(conn: sqlite3.Connection, settings: Settings, job_id: int, clock: Clock
             clock_note = f"; reloj del portal {offset:+.1f} s" if offset is not None else ""
             _attempt(conn, job.id, "preparar", "ok", f"página lista a las {clock.now():%H:%M:%S}{clock_note}")
 
+            # Un carrito con algo pendiente (aunque esté caducado) bloquea añadir el turno: se mira ya,
+            # antes de la hora, para no descubrirlo en el momento de pulsar (30/09 18:30)
+            in_cart = False
+            pending = session.cart_count()
+            if pending:
+                _attempt(conn, job.id, "carrito previo", "aviso", f"el carrito tiene {pending} elemento(s) antes de la apertura")
+                in_cart = _cart_holds_slot(conn, settings, job, session, day, at, warn=True) and not dry_run
+                if not in_cart:
+                    _back_to_slot(conn, job, session, day)
+
             # Pulsar cuando en el reloj del PORTAL ya sean las T (medido ±0,5 s: se toma el mínimo,
             # así nunca se pulsa antes de tiempo; observado +0,9 s el 2026-09-30)
             target = opens - portal_clock_lead(offset)
-            if clock.now() < target:
+            if not in_cart and clock.now() < target:
                 clock.wait_until(target)
 
             if dry_run:
                 return _dry_run(conn, settings, job, session, at, clock)
 
-            in_cart, reason = _click_until_in_cart(conn, settings, job, session, at, day, clock)
+            if not in_cart:
+                in_cart, reason = _click_until_in_cart(conn, settings, job, session, at, day, clock)
             if not in_cart:
                 session.capture("sin_conseguir")
                 return _finish(conn, settings, job.id, "fallido", reason, offer_watch=True)
@@ -180,6 +194,9 @@ def _run(conn: sqlite3.Connection, settings: Settings, job_id: int, clock: Clock
                 return _finish(conn, settings, job.id, "revisar",
                                "He confirmado la compra pero no he podido comprobar el resultado. Revísalo en Madrid Móvil.")
             return _finish(conn, settings, job.id, "fallido", result.message, offer_watch=True)
+    except portal.BrowserClosed as exc:
+        _attempt(conn, job.id, "navegador", "cerrado", str(exc))
+        return _finish(conn, settings, job.id, "fallido", str(exc), offer_watch=True)
     except portal.PortalError as exc:
         _attempt(conn, job.id, "portal", "error", str(exc))
         return _finish(conn, settings, job.id, "fallido", str(exc), offer_watch=True)
@@ -212,6 +229,54 @@ def _prepare_with_retries(conn, job, session, username, password, day, opens, cl
                 raise
 
 
+def _back_to_slot(conn, job, session, day) -> None:
+    """Tras mirar el carrito antes de la hora, vuelve a la página del turno (con reintentos)."""
+    for n in range(1, PREPARE_TRIES + 1):
+        try:
+            session.recover(job.service, job.center_id, day)
+            return
+        except portal.BrowserClosed:
+            raise
+        except portal.PortalError as exc:
+            _attempt(conn, job.id, f"volver al turno #{n}", "error", str(exc))
+            if n == PREPARE_TRIES:
+                raise
+
+
+def _cart_holds_slot(conn, settings, job, session, day, at, warn: bool) -> bool:
+    """Abre el carrito y mira qué hay. True si es justo este turno (listo para pagar con las
+    comprobaciones de siempre). Si hay otra cosa, se avisa por Telegram (una vez) y se sigue:
+    el bot nunca vacía el carrito."""
+    try:
+        opened = session.open_cart()
+        cart = session.read_cart(day, at) if opened else None
+    except portal.BrowserClosed:
+        raise
+    except portal.PortalError as exc:
+        _attempt(conn, job.id, "carrito", "error", str(exc))
+        return False
+    if not opened:
+        _attempt(conn, job.id, "carrito", "no", "no se pudo abrir el carrito o no se puede pagar (¿caducado?)")
+        if warn:
+            _warn_cart(conn, settings, job, "Tu carrito del portal tiene algo pendiente que no he podido abrir "
+                                               "(puede estar caducado) y puede bloquear la reserva.")
+        return False
+    if cart.items == 1 and cart.matches_slot:
+        _attempt(conn, job.id, "carrito", "retomado", "el turno está en el carrito")
+        return True
+    _attempt(conn, job.id, "carrito", "no", f"el carrito tiene {cart.items} elemento(s) que no son este turno")
+    if warn:
+        _warn_cart(conn, settings, job, f"Tu carrito del portal tiene {cart.items} elemento(s) que no son este "
+                                        "turno y pueden bloquear la reserva.")
+    return False
+
+
+def _warn_cart(conn, settings, job, text: str) -> None:
+    notify(conn, settings, job.profile_id,
+           f"⚠️ Carrito pendiente\n{slot_label(settings, job)}\n{text} Sigo intentándolo; "
+           "no lo vacío yo. Si puedes, revísalo en Madrid Móvil.")
+
+
 def attempt_window(settings: Settings) -> timedelta:
     return timedelta(seconds=settings.booking_window_s)
 
@@ -225,21 +290,29 @@ def _click_until_in_cart(conn, settings, job, session, at, day, clock) -> tuple[
     deadline = clock.now() + attempt_window(settings)
     reason = "No se pudo reservar."
     failures_in_a_row = 0
+    warned = False
     for n in range(1, MAX_CLICKS + 1):
         try:
             outcome = session.try_add_to_cart(at, job.activity)
+        except portal.BrowserClosed as exc:
+            _attempt(conn, job.id, f"pulsar #{n}", "no", str(exc))
+            return False, str(exc)
         except portal.PortalError as exc:
             outcome = AddOutcome(False, str(exc), page_broken=True)
         _attempt(conn, job.id, f"pulsar #{n}", "carrito" if outcome.in_cart else "no", outcome.message)
         if outcome.in_cart:
             return True, ""
-        if ALREADY_BOOKED in outcome.message:
-            # Ya lo tienes: o está en tu carrito sin pagar (p. ej. de un intento anterior) o ya reservado.
-            # Se abre el carrito; quien llama comprueba que solo está este turno antes de pagar.
-            if session.open_cart():
-                _attempt(conn, job.id, "carrito", "retomado", "el turno ya estaba en el carrito")
+        already = ALREADY_BOOKED in outcome.message
+        if already or outcome.check_cart:
+            # El portal habla del carrito (turno ya en él, carrito caducado, el contador subió sin que la
+            # página fuera al carrito…): se abre y, si es este turno, se sigue con él hasta pagarlo
+            if _cart_holds_slot(conn, settings, job, session, day, at, warn=not warned):
                 return True, ""
-            return False, "Ya tienes este turno reservado (o en el carrito) y no pude abrir el carrito."
+            warned = True
+            if already:
+                return False, "Ya tienes este turno reservado (no está en el carrito para pagarlo)."
+            # Otra cosa bloquea el carrito: se vuelve a la página del turno y se sigue, sin machacar
+            outcome = AddOutcome(False, outcome.message, page_broken=True)
         reason = outcome.message or reason
         if clock.now() >= deadline:
             return False, f"{reason} (sin éxito tras {n} intentos en {_minutes(attempt_window(settings))})"
@@ -263,6 +336,9 @@ def _click_until_in_cart(conn, settings, job, session, at, day, clock) -> tuple[
             state = session.slot_state(at, job.activity)
             if state.found and state.free == 0:
                 return False, "Completo: no quedan plazas."
+        except portal.BrowserClosed as exc:
+            _attempt(conn, job.id, "reentrar", "error", str(exc))
+            return False, str(exc)
         except portal.PortalError as exc:
             _attempt(conn, job.id, "reentrar", "error", str(exc))
     return False, f"{reason} (sin éxito tras {MAX_CLICKS} intentos)"

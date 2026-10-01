@@ -99,6 +99,11 @@ class FakeSession:
     def read_cart(self, day, at):
         return self.cart
 
+    pending = 0  # contador del carrito antes de empezar
+
+    def cart_count(self):
+        return self.pending
+
     def open_cart(self):
         self.opened_cart = True
         return True
@@ -569,3 +574,104 @@ def test_gives_up_when_the_window_ends(settings, sent):
     assert run(short, make_job(settings), session, clock) == "fallido"
     assert session.click_times[-1] - OPENS <= timedelta(seconds=120)
     assert "en 2 min" in sent[-1][0]
+
+
+# --- el carrito habla (30/09: un turno caducado en el carrito bloqueó la reserva de las 18:30) ---
+
+EXPIRED = "La operación no se puede realizar porque el carrito ya está expirado."
+
+
+def test_cart_message_opens_the_cart_and_follows_it(settings, sent):
+    clock = FakeClock(OPENS - timedelta(seconds=60))
+    session = FakeSession(clock, clicks=[AddOutcome(False, EXPIRED, check_cart=True)])
+    assert run(settings, make_job(settings), session, clock) == "reservado"
+    assert session.opened_cart and session.confirmed
+    _, attempts = job_of(settings, 1)
+    assert ("carrito", "retomado") in [(a.action, a.result) for a in attempts]
+
+
+def test_slot_that_silently_entered_the_cart_is_paid(settings, sent):
+    """Lo del 30/09 a las 18:00: el portal tardó 24 s, no fue al carrito pero el contador subió."""
+    clock = FakeClock(OPENS - timedelta(seconds=60))
+    session = FakeSession(clock, clicks=[AddOutcome(False, "El portal no hizo nada al pulsar el turno.", check_cart=True)])
+    assert run(settings, make_job(settings), session, clock) == "reservado"
+    assert len(session.click_times) == 1
+
+
+def test_blocking_cart_warns_once_and_keeps_trying(settings, sent):
+    clock = FakeClock(OPENS - timedelta(seconds=60))
+
+    class OtherThingThenFree(FakeSession):
+        def read_cart(self, day, at):
+            return self.cart if self.clicks == [] else Cart(1, False, Decimal("4.00"), Decimal("20.00"), False)
+
+    session = OtherThingThenFree(clock, clicks=[AddOutcome(False, EXPIRED, check_cart=True)] * 2 + [AddOutcome(True, "")])
+    assert run(settings, make_job(settings), session, clock) == "reservado"
+    assert session.recoveries == 2  # vuelve a la página del turno tras mirar el carrito
+    warnings = [text for text, _ in sent if text.startswith("⚠️ Carrito pendiente")]
+    assert len(warnings) == 1 and "no lo vacío" in warnings[0]
+
+
+def test_slot_already_in_cart_before_opening_is_paid_without_clicking(settings, sent):
+    clock = FakeClock(OPENS - timedelta(seconds=60))
+    session = FakeSession(clock)
+    session.pending = 1
+    assert run(settings, make_job(settings), session, clock) == "reservado"
+    assert session.click_times == [] and session.confirmed
+
+
+def test_other_things_in_cart_before_opening_warn_and_still_click_on_time(settings, sent):
+    clock = FakeClock(OPENS - timedelta(seconds=60))
+    session = FakeSession(clock, cart=Cart(1, False, Decimal("4.00"), Decimal("20.00"), False))
+    session.pending = 1
+    assert run(settings, make_job(settings), session, clock) == "fallido"  # el carrito sigue sin ser este turno
+    assert session.click_times[0] == OPENS
+    assert not session.confirmed
+    assert any(text.startswith("⚠️ Carrito pendiente") for text, _ in sent)
+
+
+def test_dry_run_never_pays_a_cart_found_before_opening(settings, sent):
+    clock = FakeClock(OPENS - timedelta(seconds=60))
+    session = FakeSession(clock)
+    session.pending = 1
+    assert run(settings, make_job(settings, dry_run=True), session, clock) == "prueba_ok"
+    assert not session.confirmed
+
+
+def test_closed_browser_stops_at_once(settings, sent):
+    from src.portal.errors import BrowserClosed
+
+    clock = FakeClock(OPENS - timedelta(seconds=60))
+
+    class Closed(FakeSession):
+        def try_add_to_cart(self, at, activity):
+            self.click_times.append(self.clock.now())
+            raise BrowserClosed("Se cerró el navegador del bot a mitad de la reserva.")
+
+    session = Closed(clock)
+    assert run(settings, make_job(settings), session, clock) == "fallido"
+    assert len(session.click_times) == 1
+    assert "Se cerró el navegador" in sent[-1][0]
+
+
+def test_cart_badge_is_read_from_the_header():
+    header = '<a href="../CarritoConfirmar" id="aCarrito"><span class="glyphicon"></span><span id="spnCarrito" class="badge">{}</span></a>'
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        session = BookingSession.__new__(BookingSession)
+        session.page = browser.new_page()
+        session.page.set_content(header.format(1))
+        assert session.cart_count() == 1
+        session.page.set_content('<a id="aCarrito"><span class="glyphicon"></span></a>')
+        assert session.cart_count() == 0
+        browser.close()
+
+
+def test_closed_browser_error_is_recognised():
+    from playwright.sync_api import Error as PlaywrightError
+
+    from src.portal.booking import _portal_error
+    from src.portal.errors import BrowserClosed
+
+    assert isinstance(_portal_error(PlaywrightError("Locator.click: Target page, context or browser has been closed")), BrowserClosed)
+    assert not isinstance(_portal_error(PlaywrightError("Timeout 45000ms exceeded")), BrowserClosed)
