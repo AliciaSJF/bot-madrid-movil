@@ -1,0 +1,29 @@
+# Nada de secretos ni datos personales dentro de la imagen
+.env
+.env.*
+!.env.example
+data/
+state*.json
+*.har
+*.db
+*.sqlite
+*.sqlite3
+
+# Lo que no hace falta para ejecutar
+.git
+.gitignore
+.venv
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+playwright-report/
+test-results/
+screenshots/
+.vscode/
+.idea/
+.claude/
+Dockerfile
+docker-compose.yml
+.dockerignore

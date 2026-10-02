@@ -1,0 +1,31 @@
+services:
+  bot:
+    build: .
+    image: bot-madrid-movil
+    container_name: bot-madrid-movil
+    # Arranca con la Pi y se levanta solo si se cae
+    restart: unless-stopped
+    # Recoge los procesos de Chromium que queden huérfanos
+    init: true
+    env_file: .env
+    environment:
+      DATA_DIR: /app/data
+      TZ: Europe/Madrid
+      HEADLESS: "true"
+      BROWSER_CHANNEL: ""
+    volumes:
+      # La BD (bot.db) se crea sola aquí la primera vez; sobrevive a reconstruir la imagen
+      - ./data:/app/data
+    ports:
+      # Puerto poco común en la Pi → 8000 dentro del contenedor.
+      # Accesible en la red de casa y por Tailscale. No abrir este puerto en el router.
+      - "8487:8000"
+    # Chromium usa /dev/shm; el valor por defecto de Docker (64 MB) se le queda corto
+    shm_size: "256mb"
+    # Deja terminar una reserva en curso al parar el contenedor
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
