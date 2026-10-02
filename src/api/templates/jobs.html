@@ -22,7 +22,7 @@
     </form>
     {% elif job.id in cancellable %}
     <form method="post" action="/reservas/{{ job.id }}/anular?filtro={{ current_filter }}"
-          onsubmit="if (!confirm('¿Anular esta reserva en el portal? El importe vuelve a tu monedero.')) return false; this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Anulando en el portal…';">
+          onsubmit="if (!confirm('¿Anular esta reserva en el portal? Si la pagaste con el monedero, el importe vuelve a él.')) return false; this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Anulando en el portal…';">
       <button class="btn btn-secondary" type="submit">Anular reserva</button>
     </form>
     {% endif %}

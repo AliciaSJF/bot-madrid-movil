@@ -140,3 +140,17 @@ def test_find_row_uses_start_time_column_and_center():
         assert _find_row(page, date(2026, 10, 3), time(19, 0), "Aluche") is None
         assert _find_row(page, date(2026, 10, 9), time(19, 0), "Aluche") is None
         browser.close()
+
+
+def test_cancel_waits_for_a_booking_of_the_same_profile(settings, sent, monkeypatch):
+    """Anular abre otro navegador con la misma sesión: no mientras el bot reserva para ese perfil."""
+    from src.core.booking import profile_lock
+
+    job_id, _ = booked_job(settings)
+    monkeypatch.setattr(portal, "cancel_reservation", lambda *a: pytest.fail("no debe tocar el portal"))
+    conn = connect(settings.data_dir)
+    with profile_lock(1):
+        outcome = core_cancel.cancel_booking(conn, settings, job_id, 1)
+    assert not outcome.ok and "otra reserva tuya" in outcome.message
+    assert jobs_repo.get_job(conn, job_id).status == "reservado"
+    conn.close()

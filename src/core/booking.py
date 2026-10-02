@@ -1,23 +1,29 @@
-"""Ejecutar una reserva: preparar 1 min antes, pulsar a la hora exacta con reintentos, pagar con monedero.
+"""Ejecutar una reserva: preparar 1 min antes, pulsar a la hora exacta con reintentos, pagar con monedero o abono.
 
 Cronología de un turno que abre a las T (T = inicio − 49 h):
     T − 60 s   el programador lanza run_booking: sesión (o login) y página del centro y día abierta
                si el carrito ya tiene algo, se abre: si es este turno se paga; si no, aviso por Telegram
     T          pulsa el turno; si el portal no lo deja aún o no responde, refresca y reintenta
     T + 10 min se deja de intentar (o antes si el portal lo muestra completo)
-    aviso      si el portal habla del carrito (caducado, ya está en él…) o su contador sube, se abre
-               el carrito y, si es este turno, se sigue con él
-    carrito    un solo elemento, que sea este turno, monedero con saldo ≥ total → «Confirmar la compra»
+    aviso      si el portal habla del carrito (caducado, ya está en él, límite diario…) o su contador
+               sube, se abre el carrito: si es este turno se sigue con él; si estaba caducado, el
+               portal lo descarta al abrirlo y se vuelve a pulsar
+    carrito    un solo elemento, que sea este turno, y monedero con saldo ≥ total o ninguna forma de
+               pago (lo cubre el abono) → «Confirmar la compra»
 
 Modo prueba: todo igual hasta T, pero no pulsa el turno (pulsarlo ya lo mete en el carrito);
 solo comprueba que a esa hora se podía pulsar.
+
+Una reserva a la vez por perfil (el carrito y la sesión del portal son de la persona).
 
 Siempre termina con un aviso por Telegram. Si no se consigue por falta de plazas, el aviso ofrece
 «Observar» para vigilar el turno por si se libera.
 """
 
 import logging
+import re
 import sqlite3
+import threading
 import time as time_module
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -108,12 +114,29 @@ def booking_imminent(conn: sqlite3.Connection, settings: Settings, now: datetime
     return False
 
 
+# Una reserva a la vez por perfil: el carrito y la sesión del portal son de la persona, y dos
+# navegadores con la misma sesión se pisan (02/10: el segundo dejaba al primero en «Error al
+# procesar la petición» y el carrito con dos turnos). Perfiles distintos sí van en paralelo.
+_PROFILE_LOCKS: dict[int, threading.Lock] = {}
+_PROFILE_LOCKS_GUARD = threading.Lock()
+
+
+def profile_lock(profile_id: int) -> threading.Lock:
+    """Cerrojo del perfil: lo toma cada reserva, y anular lo necesita libre (misma sesión del portal)."""
+    with _PROFILE_LOCKS_GUARD:
+        return _PROFILE_LOCKS.setdefault(profile_id, threading.Lock())
+
+
 def run_booking(settings: Settings, job_id: int, clock: Clock | None = None) -> str:
     """Ejecuta la reserva del job de principio a fin. Devuelve el estado final. Nunca lanza."""
     clock = clock or Clock(now=lambda: datetime.now(settings.zone))
     conn = connect(settings.data_dir)
     try:
-        return _run(conn, settings, job_id, clock)
+        job = jobs_repo.get_job(conn, job_id)
+        if job is None:
+            return "desconocido"
+        with profile_lock(job.profile_id):
+            return _run(conn, settings, job_id, clock)
     except Exception as exc:  # hilo en segundo plano: cualquier fallo queda registrado y avisado
         log.exception("Reserva %s: error inesperado", job_id)
         return _finish(conn, settings, job_id, "fallido", f"Error inesperado del bot ({type(exc).__name__}).", offer_watch=False)
@@ -150,7 +173,7 @@ def _run(conn: sqlite3.Connection, settings: Settings, job_id: int, clock: Clock
             pending = session.cart_count()
             if pending:
                 _attempt(conn, job.id, "carrito previo", "aviso", f"el carrito tiene {pending} elemento(s) antes de la apertura")
-                in_cart = _cart_holds_slot(conn, settings, job, session, day, at, warn=True) and not dry_run
+                in_cart = _check_cart(conn, settings, job, session, day, at, warn=True) == "este_turno" and not dry_run
                 if not in_cart:
                     _back_to_slot(conn, job, session, day)
 
@@ -172,8 +195,9 @@ def _run(conn: sqlite3.Connection, settings: Settings, job_id: int, clock: Clock
             cart = session.read_cart(day, at)
             problem = _cart_problem(cart)
             if problem:
+                session.capture("carrito_no_valido")  # para estudiar carritos nuevos (p. ej. con abono)
                 _attempt(conn, job.id, "carrito", "no", problem)
-                return _finish(conn, settings, job.id, "fallido", problem, offer_watch=False)
+                return _finish(conn, settings, job.id, "fallido", f"{problem} {LEFT_IN_CART}", offer_watch=False)
 
             # Última comprobación antes de comprar: que nadie lo haya cancelado mientras tanto
             current = jobs_repo.get_job(conn, job.id)
@@ -181,12 +205,15 @@ def _run(conn: sqlite3.Connection, settings: Settings, job_id: int, clock: Clock
                 _attempt(conn, job.id, "confirmar", "no", "cancelado antes de confirmar")
                 return current.status if current else "cancelado"
 
-            result = session.confirm_with_wallet(cart)
+            result = session.confirm_purchase(cart)
             _attempt(conn, job.id, "confirmar", result.status, result.message)
             if result.status == "reservado":
-                operation = result.message.partition("(operación ")[2].rstrip(").")
-                note = f", operación {operation}" if operation else ""
-                return _finish(conn, settings, job.id, "reservado", f"Pagado con el monedero ({_euros(cart.total)}{note}).")
+                details = ["sin pagar nada" if cart.covered_by_pass else euros(cart.total)]
+                reference = re.search(r"\(((?:operación|carrito) \d+)\)", result.message)
+                if reference:
+                    details.append(reference.group(1))
+                how = "Confirmado con tu abono" if cart.covered_by_pass else "Pagado con el monedero"
+                return _finish(conn, settings, job.id, "reservado", f"{how} ({', '.join(details)}).")
             if result.status == "pasarela":
                 return _finish(conn, settings, job.id, "fallido",
                                "El portal pidió pagar con tarjeta: no he seguido. Revisa el monedero.", offer_watch=False)
@@ -243,32 +270,38 @@ def _back_to_slot(conn, job, session, day) -> None:
                 raise
 
 
-def _cart_holds_slot(conn, settings, job, session, day, at, warn: bool) -> bool:
-    """Abre el carrito y mira qué hay. True si es justo este turno (listo para pagar con las
-    comprobaciones de siempre). Si hay otra cosa, se avisa por Telegram (una vez) y se sigue:
-    el bot nunca vacía el carrito."""
+def _check_cart(conn, settings, job, session, day, at, warn: bool) -> str:
+    """Abre el carrito y mira qué hay. Devuelve:
+    "este_turno"  es justo este turno (listo para pagar con las comprobaciones de siempre)
+    "caducado"    había caducado y el portal lo ha descartado al abrirlo: ya no bloquea
+    "otra_cosa"   otra cosa (o no se pudo abrir): se avisa por Telegram si warn y se sigue;
+                  el bot nunca vacía el carrito"""
     try:
         opened = session.open_cart()
-        cart = session.read_cart(day, at) if opened else None
+        cart = session.read_cart(day, at) if opened == "listo" else None
     except portal.BrowserClosed:
         raise
     except portal.PortalError as exc:
         _attempt(conn, job.id, "carrito", "error", str(exc))
-        return False
-    if not opened:
-        _attempt(conn, job.id, "carrito", "no", "no se pudo abrir el carrito o no se puede pagar (¿caducado?)")
+        return "otra_cosa"
+    if opened == "expirado":
+        # Abrirlo hace que el portal lo descarte (02/10): ya no bloquea, no hace falta avisar
+        _attempt(conn, job.id, "carrito", "caducado", "el carrito había caducado y el portal lo ha descartado")
+        return "caducado"
+    if opened != "listo":
+        _attempt(conn, job.id, "carrito", "no", "no se pudo abrir el carrito o no se puede pagar")
         if warn:
             _warn_cart(conn, settings, job, "Tu carrito del portal tiene algo pendiente que no he podido abrir "
-                                               "(puede estar caducado) y puede bloquear la reserva.")
-        return False
+                                            "y puede bloquear la reserva.")
+        return "otra_cosa"
     if cart.items == 1 and cart.matches_slot:
         _attempt(conn, job.id, "carrito", "retomado", "el turno está en el carrito")
-        return True
+        return "este_turno"
     _attempt(conn, job.id, "carrito", "no", f"el carrito tiene {cart.items} elemento(s) que no son este turno")
     if warn:
         _warn_cart(conn, settings, job, f"Tu carrito del portal tiene {cart.items} elemento(s) que no son este "
                                         "turno y pueden bloquear la reserva.")
-    return False
+    return "otra_cosa"
 
 
 def _warn_cart(conn, settings, job, text: str) -> None:
@@ -306,12 +339,13 @@ def _click_until_in_cart(conn, settings, job, session, at, day, clock) -> tuple[
         if already or outcome.check_cart:
             # El portal habla del carrito (turno ya en él, carrito caducado, el contador subió sin que la
             # página fuera al carrito…): se abre y, si es este turno, se sigue con él hasta pagarlo
-            if _cart_holds_slot(conn, settings, job, session, day, at, warn=not warned):
+            found = _check_cart(conn, settings, job, session, day, at, warn=not warned)
+            if found == "este_turno":
                 return True, ""
-            warned = True
-            if already:
+            warned = warned or found == "otra_cosa"
+            if already and found == "otra_cosa":
                 return False, "Ya tienes este turno reservado (no está en el carrito para pagarlo)."
-            # Otra cosa bloquea el carrito: se vuelve a la página del turno y se sigue, sin machacar
+            # Se vuelve a la página del turno y se sigue (con espera creciente si algo sigue bloqueando)
             outcome = AddOutcome(False, outcome.message, page_broken=True)
         reason = outcome.message or reason
         if clock.now() >= deadline:
@@ -349,23 +383,29 @@ def _minutes(delta: timedelta) -> str:
     return f"{minutes:.0f} min" if minutes >= 1 else f"{delta.total_seconds():.0f} s"
 
 
+LEFT_IN_CART = ("El turno se ha quedado en tu carrito del portal: si no lo quieres, elimínalo en Madrid Móvil, "
+                "porque mientras siga ahí bloquea otras reservas (el bot nunca vacía el carrito).")
+
+
 def _cart_problem(cart) -> str | None:
     if cart.items != 1 or not cart.matches_slot:
         return (f"El carrito tiene {cart.items} elementos y no solo este turno: no he confirmado para no pagar "
-                "otras cosas. Revisa el carrito en Madrid Móvil (caduca solo).")
+                "otras cosas.")
     if cart.needs_terms:
         return "El portal pide aceptar condiciones antes de pagar: no he confirmado."
+    if cart.covered_by_pass:
+        return None  # sin formas de pago: el turno entra en el abono y se confirma sin pagar nada
     if cart.wallet_balance is None:
         return "El monedero no aparece como forma de pago: no he confirmado (el bot nunca usa tarjeta ni Bizum)."
     if cart.total is None:
         return "No he podido leer el total del carrito: no he confirmado."
     if cart.wallet_balance < cart.total:
-        return (f"Sin saldo suficiente en el monedero ({_euros(cart.wallet_balance)} para {_euros(cart.total)}): "
-                "no he confirmado. El turno queda en tu carrito del portal hasta que caduque.")
+        return (f"Sin saldo suficiente en el monedero ({euros(cart.wallet_balance)} para {euros(cart.total)}): "
+                "no he confirmado.")
     return None
 
 
-def _euros(amount) -> str:
+def euros(amount) -> str:
     return f"{amount:.2f} €".replace(".", ",") if amount is not None else "?"
 
 

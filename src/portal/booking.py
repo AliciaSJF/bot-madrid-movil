@@ -8,9 +8,10 @@ Uso (desde src/core/booking.py):
         ...esperar a la hora exacta...
         outcome = session.try_add_to_cart(at, activity)   # repetir si hace falta
         cart = session.read_cart(day, at)
-        result = session.confirm_with_wallet(cart)         # ÚNICO paso que compra
+        result = session.confirm_purchase(cart)            # ÚNICO paso que compra
 
-Reglas: solo se paga con Monedero; nunca se toca tarjeta ni Bizum; si el carrito trae algo más
+Reglas: solo se paga con Monedero, o con el abono si el carrito no ofrece ninguna forma de pago
+(así lo muestra el portal cuando el turno entra en tu abono); nunca se toca tarjeta ni Bizum; si el carrito trae algo más
 que este turno, si pide aceptar condiciones o si sale del portal hacia una pasarela de pago, se para.
 """
 
@@ -50,7 +51,10 @@ IN_ASYNC_POSTBACK_JS = """() => {
 CONFIRM_RESULT_TIMEOUT_S = 30
 # Al abrir el carrito, cuánto se espera al botón de confirmar (un carrito caducado podría no traerlo)
 CART_READY_TIMEOUT_MS = 20_000
+# Si el carrito no muestra formas de pago, margen para asegurarse de que no están aún cargando
+PASS_CHECK_WAIT_MS = 1_500
 CLOSED_MESSAGE = "Se cerró el navegador del bot a mitad de la reserva."
+CART_OR_RESULT = re.compile(f"({re.escape(sel.CART_PATH)}|{re.escape(sel.CART_RESULT_PATH)})")
 
 
 def _is_closed(exc: PlaywrightError) -> bool:
@@ -90,6 +94,12 @@ class Cart:
     total: Decimal | None
     wallet_balance: Decimal | None  # None si no aparece la opción Monedero
     needs_terms: bool
+    # Formas de pago que ofrece (Tarjeta, Bizum, Monedero). 0 = lo cubre el abono: se confirma sin elegir
+    payment_options: int = 1
+
+    @property
+    def covered_by_pass(self) -> bool:
+        return self.payment_options == 0
 
 
 @dataclass(frozen=True)
@@ -120,6 +130,7 @@ class BookingSession:
         self.context: BrowserContext | None = None
         self.page: Page | None = None
         self.day: date | None = None
+        self._cart_before = 0  # contador del carrito justo antes del último clic
 
     # --- ciclo de vida -------------------------------------------------------
 
@@ -240,7 +251,8 @@ class BookingSession:
                 alerts = self._visible_alerts()
                 if alerts:
                     text = re.sub(r"\s+", " ", alerts[0])[:200]
-                    return AddOutcome(False, text, check_cart=bool(sel.CART_ALERT.search(text)))
+                    about_cart = bool(sel.CART_ALERT.search(text)) or sel.DAILY_LIMIT_TEXT in text
+                    return AddOutcome(False, text, check_cart=about_cart)
                 busy = self._in_postback()
                 if not busy and (datetime.now() - clicked).total_seconds() > CLICK_IDLE_S:
                     # El 30/09 a las 18:00 el turno entró en el carrito sin que la página fuera a él
@@ -264,29 +276,36 @@ class BookingSession:
             return 0  # la página está cambiando
 
     def _cart_grew(self) -> bool:
-        return self.cart_count() > getattr(self, "_cart_before", 0)
+        return self.cart_count() > self._cart_before
 
-    def open_cart(self) -> bool:
-        """Abre el carrito desde el enlace de la cabecera (o sigue en él si ya está). Devuelve True si
-        se ve el botón de confirmar; False si no se pudo abrir o el carrito no está para pagar."""
+    def open_cart(self) -> str:
+        """Abre el carrito desde el enlace de la cabecera (o sigue en él si ya está). Devuelve:
+        "listo"     se ve «Confirmar la compra»
+        "expirado"  el carrito había caducado: el portal lo enseña como «Expirado» y lo descarta
+        "no"        no se pudo abrir o no está para pagar"""
 
-        def run() -> bool:
+        def run() -> str:
             if sel.CART_PATH not in self.page.url:
                 link = self.page.locator(sel.HEADER_CART_LINK)
                 if link.count() == 0:
-                    return False
+                    return "no"
                 link.first.click()
                 try:
-                    self.page.wait_for_url(f"**{sel.CART_PATH}**")
+                    self.page.wait_for_url(CART_OR_RESULT)
                 except PlaywrightTimeoutError:
                     self._capture("carrito_no_abre")
-                    return False
+                    return "no"
+            if sel.CART_RESULT_PATH in self.page.url:
+                self.page.wait_for_load_state("domcontentloaded")
+                expired = sel.CART_EXPIRED_TEXT in self.page.locator("body").inner_text()
+                self._capture("carrito_expirado" if expired else "carrito_resultado")
+                return "expirado" if expired else "no"
             try:
                 self.page.locator(sel.CART_CONFIRM_BUTTON).wait_for(timeout=CART_READY_TIMEOUT_MS)
             except PlaywrightTimeoutError:
                 self._capture("carrito_sin_confirmar")
-                return False
-            return True
+                return "no"
+            return "listo"
 
         return self._guard(run)
 
@@ -345,23 +364,31 @@ class BookingSession:
                 text = re.sub(r"\s+", " ", items.first.inner_text())
                 matches = spanish_date(day) in text and at.strftime("%H:%M") in text
             total = parse_money(self.page.locator(sel.CART_TOTAL).first.inner_text()) if self.page.locator(sel.CART_TOTAL).count() else None
-            wallet = self.page.locator(sel.PAYMENT_METHODS).filter(has_text=sel.PAYMENT_WALLET_TEXT)
+            methods = self.page.locator(sel.PAYMENT_METHODS)
+            if methods.count() == 0:
+                # Antes de dar por hecho que es el abono, que la página haya terminado de cargar
+                self.page.wait_for_load_state("networkidle")
+                self.page.wait_for_timeout(PASS_CHECK_WAIT_MS)
+            wallet = methods.filter(has_text=sel.PAYMENT_WALLET_TEXT)
             balance = parse_money(wallet.first.inner_text()) if wallet.count() else None
             terms = self.page.locator(f"{sel.CART_TERMS} input[type=checkbox]")
-            return Cart(count, matches, total, balance, terms.count() > 0)
+            return Cart(count, matches, total, balance, terms.count() > 0, methods.count())
 
         return self._guard(run)
 
-    def confirm_with_wallet(self, cart: Cart) -> ConfirmResult:
-        """Marca Monedero y pulsa «Confirmar la compra». ESTE ES EL PASO QUE COMPRA.
+    def confirm_purchase(self, cart: Cart) -> ConfirmResult:
+        """Marca Monedero (o nada, si lo cubre el abono) y pulsa «Confirmar la compra».
+        ESTE ES EL PASO QUE COMPRA.
 
-        Quien llama ya ha comprobado el carrito (un solo elemento, saldo suficiente, sin condiciones).
+        Quien llama ya ha comprobado el carrito (un solo elemento, sin condiciones, y saldo suficiente
+        o ninguna forma de pago). Si aun así el portal sale hacia una pasarela, se para.
         """
 
         def run() -> ConfirmResult:
-            wallet = self.page.locator(sel.PAYMENT_METHODS).filter(has_text=sel.PAYMENT_WALLET_TEXT)
-            wallet.first.locator("input[type=radio]").check()
-            self.page.wait_for_load_state("networkidle")
+            if not cart.covered_by_pass:
+                wallet = self.page.locator(sel.PAYMENT_METHODS).filter(has_text=sel.PAYMENT_WALLET_TEXT)
+                wallet.first.locator("input[type=radio]").check()
+                self.page.wait_for_load_state("networkidle")
             self.page.locator(sel.CART_CONFIRM_BUTTON).click()
             # A partir de aquí la compra puede estar hecha: ningún fallo al leer la página es "fallido"
             try:
@@ -408,15 +435,24 @@ class BookingSession:
 # Verificado el 2026-09-30 con una compra real: tras «Confirmar la compra» se llega a
 # /DeportesWeb/Modulos/VentaServicios/CarritoResultado con el resumen, «Monedero Pago 4,00 €»,
 # «Operación <número>» y «Añadir a mi calendario». No hay un texto tipo «compra realizada».
+# Verificado el 2026-10-02 con dos reservas reales cubiertas por el abono («ADM USO LIBRE JOVEN 100%»):
+# la misma página dice «check_circle Confirmado», «Carrito <número>» y Total 0,00 €, sin «Operación».
 OPERATION = re.compile(r"Operaci[oó]n\s+(\d{6,})")
-FAILURE_WORDS = re.compile(r"no se ha podido|rechazad|saldo insuficiente|no hay plazas|agotad", re.I)
+CART_NUMBER = re.compile(r"Carrito\s+(\d{6,})")
+CONFIRMED_WORD = re.compile(r"\bConfirmado\b")
+FAILURE_WORDS = re.compile(r"no se ha podido|rechazad|saldo insuficiente|no hay plazas|agotad|\bExpirado\b", re.I)
 
 
 def classify_confirmation(url: str, text: str, capture: Path | None) -> ConfirmResult:
     text = re.sub(r"\s+", " ", text or "")
     if FAILURE_WORDS.search(text):
         return ConfirmResult("fallido", "El portal indicó un error al confirmar.", capture)
+    if "CarritoResultado" not in url:
+        return ConfirmResult("revisar", "No he podido comprobar el resultado de la compra.", capture)
     operation = OPERATION.search(text)
-    if "CarritoResultado" in url and operation:
+    if operation:
         return ConfirmResult("reservado", f"Compra confirmada por el portal (operación {operation.group(1)}).", capture)
+    cart = CART_NUMBER.search(text)
+    if CONFIRMED_WORD.search(text) and cart:
+        return ConfirmResult("reservado", f"Compra confirmada por el portal (carrito {cart.group(1)}).", capture)
     return ConfirmResult("revisar", "No he podido comprobar el resultado de la compra.", capture)

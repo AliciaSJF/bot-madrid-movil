@@ -104,11 +104,13 @@ class FakeSession:
     def cart_count(self):
         return self.pending
 
+    cart_page = "listo"  # lo que encuentra al abrir el carrito: listo | expirado | no
+
     def open_cart(self):
         self.opened_cart = True
-        return True
+        return self.cart_page
 
-    def confirm_with_wallet(self, cart):
+    def confirm_purchase(self, cart):
         self.confirmed = True
         return self.confirm
 
@@ -403,7 +405,8 @@ def test_read_cart_from_portal_markup():
         cart = session.read_cart(datetime(2026, 10, 1).date(), time(14, 0))
         other = session.read_cart(datetime(2026, 10, 1).date(), time(18, 0))
         browser.close()
-    assert cart == Cart(1, True, Decimal("4.00"), Decimal("20.00"), False)
+    assert cart == Cart(1, True, Decimal("4.00"), Decimal("20.00"), False, payment_options=3)
+    assert not cart.covered_by_pass
     assert other.matches_slot is False
 
 
@@ -417,6 +420,12 @@ def test_small_helpers():
     assert classify_confirmation("https://x/CarritoResultado", "Algo raro", None).status == "revisar"
     assert classify_confirmation("https://x/Otra", real, None).status == "revisar"
     assert classify_confirmation("https://x/CarritoResultado", "No se ha podido completar", None).status == "fallido"
+    # Con abono (02/10): «Confirmado» y «Carrito <número>», sin «Operación»
+    pass_page = ("check_circle Confirmado Daoíz y Velarde Carrito 8125509951 viernes, 2 de octubre de 2026 "
+                 "SALA MUSCULACION ADM USO LIBRE JOVEN 100% (ENTRADA) -5,00 € 0,00 € Total 0,00 € Salir")
+    by_pass = classify_confirmation("https://x/VentaServicios/CarritoResultado", pass_page, None)
+    assert by_pass.status == "reservado" and "carrito 8125509951" in by_pass.message
+    assert classify_confirmation("https://x/CarritoResultado", "Carrito 8125509951", None).status == "revisar"
 
 
 def test_clicks_earlier_when_portal_clock_is_ahead(settings, sent):
@@ -448,10 +457,8 @@ def test_two_bookings_at_the_same_opening_run_in_parallel(settings, monkeypatch)
     conn = connect(settings.data_dir)
     profiles_repo.create_profile(conn, "Novio", "#1d4ed8", "b@example.com", crypto.encrypt(settings, "x"))
     conn.commit()
-    ids = [
+    for pid in (1, 2):
         jobs_repo.create_job(conn, pid, 58, "Daoíz y Velarde", "Nado libre · Calle central", "piscina", SLOT, "reservar", None, False)
-        for pid in (1, 2)
-    ]
     conn.commit()
     conn.close()
 
@@ -553,7 +560,7 @@ def test_keeps_trying_while_the_portal_is_down_for_minutes(settings, sent):
     session = DownThenBack(clock)
     assert run(settings, make_job(settings), session, clock) == "reservado"
     # Espera creciente entre reintentos: no machaca el portal mientras está caído
-    gaps = [(b - a).total_seconds() for a, b in zip(session.click_times, session.click_times[1:])]
+    gaps = [(b - a).total_seconds() for a, b in zip(session.click_times, session.click_times[1:], strict=False)]
     assert gaps[0] < gaps[-1]
     assert len(session.click_times) < 20
 
@@ -675,3 +682,118 @@ def test_closed_browser_error_is_recognised():
 
     assert isinstance(_portal_error(PlaywrightError("Locator.click: Target page, context or browser has been closed")), BrowserClosed)
     assert not isinstance(_portal_error(PlaywrightError("Timeout 45000ms exceeded")), BrowserClosed)
+
+
+# --- abono de uso libre: el carrito no ofrece ninguna forma de pago ---------------
+
+def test_pass_covered_cart_is_confirmed_without_payment_method(settings, sent):
+    clock = FakeClock(OPENS - timedelta(seconds=60))
+    session = FakeSession(clock, cart=Cart(1, True, None, None, False, payment_options=0),
+                          confirm=ConfirmResult("reservado", "Compra confirmada por el portal (carrito 8125509951).", None))
+    assert run(settings, make_job(settings), session, clock) == "reservado"
+    assert session.confirmed
+    job, _ = job_of(settings, 1)
+    assert job.result_message == "Confirmado con tu abono (sin pagar nada, carrito 8125509951)."
+
+
+@pytest.mark.parametrize(
+    ("cart", "text"),
+    [
+        (Cart(2, False, None, None, False, payment_options=0), "El carrito tiene 2 elementos"),
+        (Cart(1, True, None, None, True, payment_options=0), "aceptar condiciones"),
+        (Cart(1, True, Decimal("4.00"), None, False, payment_options=2), "El monedero no aparece"),  # tarjeta y Bizum
+    ],
+)
+def test_pass_never_skips_the_other_checks(settings, sent, cart, text):
+    clock = FakeClock(OPENS - timedelta(seconds=60))
+    session = FakeSession(clock, cart=cart)
+    assert run(settings, make_job(settings), session, clock) == "fallido"
+    assert not session.confirmed and text in sent[-1][0]
+
+
+def test_read_cart_without_payment_methods_means_pass():
+    html = (FIXTURES / "cart_page.html").read_text(encoding="utf-8")
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        session = BookingSession.__new__(BookingSession)
+        session.page = browser.new_page()
+        session.page.set_content(html)
+        session.page.evaluate("document.querySelector('#ContentFixedSection_uCarritoConfirmar_divPaymentMethods').remove()")
+        cart = session.read_cart(datetime(2026, 10, 1).date(), time(14, 0))
+        browser.close()
+    assert cart.covered_by_pass and cart.items == 1 and cart.matches_slot
+
+
+@pytest.mark.parametrize(("profiles", "expected_overlap"), [((1, 1), 1), ((1, 2), 2)])
+def test_one_booking_at_a_time_per_profile(settings, sent, monkeypatch, profiles, expected_overlap):
+    """El carrito y la sesión del portal son de la persona: dos reservas suyas a la vez se pisan."""
+    import threading
+    import time as real_time
+
+    import src.core.booking as mod
+
+    conn = connect(settings.data_dir)
+    profiles_repo.create_profile(conn, "Novio", "#1d4ed8", "b@example.com", crypto.encrypt(settings, "clave-portal"))
+    ids = [jobs_repo.create_job(conn, pid, 58, "Daoíz y Velarde", "Nado libre · Calle central", "piscina",
+                                SLOT, "reservar", None, False) for pid in profiles]
+    conn.commit()
+    conn.close()
+
+    inside, overlap, lock = [], [], threading.Lock()
+
+    class Tracked(FakeSession):
+        def __enter__(self):
+            with lock:
+                inside.append(self)
+                overlap.append(len(inside))
+            real_time.sleep(0.2)
+            return self
+
+        def __exit__(self, *exc):
+            with lock:
+                inside.remove(self)
+            return False
+
+    monkeypatch.setattr(mod, "BookingSession", lambda *a, **k: Tracked(FakeClock(OPENS)))
+    threads = [threading.Thread(target=core_booking.run_booking, args=(settings, job_id)) for job_id in ids]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    assert max(overlap) == expected_overlap
+
+
+def test_expired_cart_is_discarded_and_clicking_goes_on(settings, sent):
+    """Lo del 02/10: el carrito caducado, al abrirlo, sale como «Expirado» y el portal lo descarta."""
+    clock = FakeClock(OPENS - timedelta(seconds=60))
+
+    class ExpiredOnce(FakeSession):
+        def open_cart(self):
+            self.cart_page, page = "listo", self.cart_page
+            return page
+
+    session = ExpiredOnce(clock, clicks=[AddOutcome(False, "No se permiten más de 1 reservas por persona para cada día.",
+                                                    check_cart=True), AddOutcome(True, "")])
+    session.cart_page = "expirado"
+    assert run(settings, make_job(settings), session, clock) == "reservado"
+    assert len(session.click_times) == 2
+    assert not any(text.startswith("⚠️ Carrito pendiente") for text, _ in sent)  # nada que avisar
+
+
+def test_already_booked_with_expired_cart_keeps_trying(settings, sent):
+    clock = FakeClock(OPENS - timedelta(seconds=60))
+    msg = "La sesión seleccionada no permite más de 1 reserva(s) por persona."
+
+    class ExpiredOnce(FakeSession):
+        def open_cart(self):
+            self.cart_page, page = "listo", self.cart_page
+            return page
+
+    session = ExpiredOnce(clock, clicks=[AddOutcome(False, msg), AddOutcome(True, "")])
+    session.cart_page = "expirado"
+    assert run(settings, make_job(settings), session, clock) == "reservado"
+
+
+def test_expired_result_page_is_never_a_success():
+    page = "cancel Expirado Daoíz y Velarde Carrito 8125509514 SALA MUSCULACION Total 0,00 € Salir"
+    assert classify_confirmation("https://x/VentaServicios/CarritoResultado", page, None).status == "fallido"

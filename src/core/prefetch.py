@@ -48,11 +48,6 @@ def schedule_prefetch(settings: Settings, profile_id: int) -> bool:
     return True
 
 
-def is_prefetching(profile_id: int) -> bool:
-    with _pending_lock:
-        return profile_id in _pending
-
-
 def _run(settings: Settings, profile_id: int) -> None:
     try:
         prefetch(settings, profile_id, datetime.now(settings.zone))

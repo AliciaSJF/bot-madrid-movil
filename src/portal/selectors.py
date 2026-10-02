@@ -113,6 +113,11 @@ lists => lists.map(ul => {
 
 # Pulsar la hora de un turno elegible lo mete en el carrito y lleva aquí
 CART_PATH = "/DeportesWeb/Modulos/VentaServicios/CarritoConfirmar"
+# Página de resultado del carrito. Verificado 2026-10-02: tras confirmar dice «Confirmado»; y si se abre
+# desde la cabecera un carrito caducado, el portal lleva aquí con «Expirado» y lo descarta (después
+# ya se puede añadir otro turno)
+CART_RESULT_PATH = "/DeportesWeb/Modulos/VentaServicios/CarritoResultado"
+CART_EXPIRED_TEXT = "Expirado"
 # Enlace al carrito en la cabecera (verificado 2026-09-30): pulsarlo sí funciona, abrir la URL a mano no
 HEADER_CART_LINK = "#aCarrito"
 # Número de elementos en el carrito (<span id="spnCarrito" class="badge">1</span>; sin elementos no
@@ -124,6 +129,9 @@ CART_ALERT = re.compile(r"carrito", re.IGNORECASE)
 # Mensaje al pulsar un turno que ya está en tu carrito o ya reservaste (verificado 2026-09-30):
 # «La sesión seleccionada no permite más de 1 reserva(s) por persona.»
 ALREADY_BOOKED_TEXT = "no permite más de"
+# Con el abono (02/10): «No se permiten más de 1 reservas por persona para cada día.» Salió mientras
+# había un turno pendiente en el carrito y dejó de salir al caducar este: se trata como aviso del carrito
+DAILY_LIMIT_TEXT = "reservas por persona para cada día"
 # Abrir el carrito por URL no sirve: el portal devuelve a Home ("el estado de la página ha variado")
 CART_ITEMS = "ul.list-group.cart > li.list-group-item:not([id$='_liTotal'])"
 CART_TOTAL = "[id$='uCarritoConfirmar_liTotal']"

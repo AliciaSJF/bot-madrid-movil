@@ -6,12 +6,14 @@ Tres hilos:
     vigilante     cada watch_interval: vigilancias de plazas (modo observar)
     telegram      escucha los botones de los avisos y los «/start» de vinculación (long polling)
 
-Cada reserva corre en su propio hilo para que dos a la misma hora no se esperen.
+Cada reserva corre en su propio hilo para que las de perfiles distintos a la misma hora no se
+esperen (las de un mismo perfil van una detrás de otra: ver core/booking.py).
 """
 
 import logging
 import threading
 from datetime import datetime
+from functools import partial
 
 from src.config import Settings
 from src.core import booking as core_booking
@@ -124,11 +126,15 @@ class Worker:
                         conn,
                         self.settings,
                         datetime.now(self.settings.zone),
-                        on_callback=lambda cb: handle_callback(conn, self.settings, cb, self.start_booking),
+                        on_callback=partial(self._on_callback, conn),
                         wait_s=LONG_POLL_S,
                     )
                 except TelegramError as exc:
-                    log.warning("Telegram: %s", exc)
+                    if "409" in str(exc):  # otro proceso escucha con el mismo token (p. ej. la Raspberry)
+                        log.warning("Telegram: otra copia del bot está usando este mismo token; los botones "
+                                    "de los avisos pueden llegarle a ella. Deja solo una encendida.")
+                    else:
+                        log.warning("Telegram: %s", exc)
                     self._stop.wait(TELEGRAM_RETRY_S)
                 except Exception:
                     log.exception("Error escuchando Telegram")
@@ -137,6 +143,9 @@ class Worker:
                     conn.close()
         finally:
             self.telegram_listening = False
+
+    def _on_callback(self, conn, callback) -> None:
+        handle_callback(conn, self.settings, callback, self.start_booking)
 
 
 _worker: Worker | None = None
