@@ -12,7 +12,16 @@
 <p class="step">Paso 2 de 4 · Elige el polideportivo</p>
 
 {% if centers %}
-<input class="search" type="search" id="center-search" placeholder="Buscar polideportivo o barrio" aria-label="Buscar polideportivo" autocomplete="off">
+<div class="search-row">
+  <input class="search" type="search" id="center-search" placeholder="Buscar polideportivo o barrio" aria-label="Buscar polideportivo" autocomplete="off">
+  <form method="post" action="/reservar/{{ service }}/actualizar" class="refresh-form">
+    <button class="icon-btn refresh-btn" type="submit" aria-label="Actualizar la lista desde el portal"
+            title="Actualizar la lista desde el portal{% if updated_at %} (actualizada {{ updated_at | slot }}){% endif %}">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
+    </button>
+  </form>
+</div>
+<p class="hint refresh-status" id="refresh-status" hidden>Consultando el portal… (unos 20 segundos)</p>
 
 <ul class="center-list" id="center-list">
   {% for c in centers %}
@@ -33,20 +42,30 @@
 </ul>
 <p class="empty" id="no-results" hidden>Ningún polideportivo coincide.</p>
 {% else %}
-<div class="empty">
-  <p>Todavía no hay lista de polideportivos para este servicio.</p>
-</div>
+<section class="card first-sync">
+  <h2 class="section-title">Primero, trae los polideportivos</h2>
+  <p>La primera vez hay que sincronizar con el portal la lista de polideportivos de
+     {{ SERVICES[service] | lower }}. Tarda unos 20 segundos y solo hace falta una vez:
+     después se actualiza sola cada día.</p>
+  <form method="post" action="/reservar/{{ service }}/actualizar" class="refresh-form">
+    <button class="btn btn-primary" type="submit">Sincronizar con el portal</button>
+  </form>
+  <p class="hint refresh-status" id="refresh-status" hidden>Consultando el portal… (unos 20 segundos)</p>
+</section>
 {% endif %}
 
-<form method="post" action="/reservar/{{ service }}/actualizar" class="refresh"
-      onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Consultando el portal…'">
-  <button class="btn {{ 'btn-ghost' if centers else 'btn-primary' }}" type="submit">
-    {{ 'Actualizar desde el portal' if centers else 'Cargar polideportivos del portal' }}
-  </button>
-  {% if updated_at %}<p class="hint">Actualizada: {{ updated_at | slot }}</p>{% endif %}
-</form>
-
 <script>
+  // Actualizar desde el portal: la rueda gira (o el botón se bloquea) mientras se consulta
+  document.querySelectorAll(".refresh-form").forEach((form) => {
+    form.addEventListener("submit", () => {
+      const button = form.querySelector("button");
+      button.disabled = true;
+      button.classList.add("is-spinning");
+      if (!button.classList.contains("icon-btn")) button.textContent = "Sincronizando…";
+      document.getElementById("refresh-status").hidden = false;
+    });
+  });
+
   // Buscar sin tildes ni mayúsculas
   const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   const search = document.getElementById("center-search");

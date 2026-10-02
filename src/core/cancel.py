@@ -59,10 +59,14 @@ def _cancel(conn: sqlite3.Connection, settings: Settings, job: jobs_repo.Job, pr
 
     jobs_repo.add_attempt(conn, job.id, "anular", result.status, result.message)
     if result.status in ("anulado", "ya_anulado"):
-        balance = f"\nSaldo del monedero: {euros(result.wallet_balance)}" if result.wallet_balance is not None else ""
-        jobs_repo.set_status(conn, job.id, "anulado", f"Anulada desde la app. {result.message}")
+        balance = euros(result.wallet_balance) if result.wallet_balance is not None else "no lo he podido leer"
+        jobs_repo.set_status(conn, job.id, "anulado", f"Anulada desde la app. Saldo del monedero: {balance}.")
         conn.commit()
-        notify(conn, settings, profile_id, f"🗑️ Reserva anulada\n{label}{balance}")
+        lines = ["🗑️ Reserva anulada", label]
+        if "bono mensual" in (job.result_message or ""):
+            lines.append("🎫 Era con tu bono mensual")
+        lines.append(f"💰 Saldo del monedero: {balance}")
+        notify(conn, settings, profile_id, "\n".join(lines))
         return CancelOutcome(True, "Reserva anulada. Te he enviado la confirmación por Telegram.")
 
     conn.commit()

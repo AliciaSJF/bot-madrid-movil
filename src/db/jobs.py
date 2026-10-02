@@ -5,16 +5,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 SERVICES = {"multitrabajo": "Sala multitrabajo", "piscina": "Nado libre"}
-MODES = {"reservar": "Reservar en la apertura", "observar": "Observar plazas libres"}
+MODES = {"reservar": "Reservar", "observar": "Observar plazas libres"}
 ON_FREE = {"reservar": "Reservar automáticamente", "avisar": "Solo avisarme"}
 
 STATUS_LABELS = {
-    "pendiente": "Pendiente",
-    "esperando_apertura": "Esperando apertura",
-    "reservando": "Reservando",
+    "pendiente": "Planificada",
+    "esperando_apertura": "Planificada",
+    "reservando": "Reservando…",
     "vigilando": "Vigilando",
     "plaza_liberada": "Plaza liberada",
-    "reservado": "Reservado",
+    "reservado": "Reserva confirmada",
     "prueba_ok": "Prueba superada",
     "avisado": "Avisado",
     "revisar": "Revisar en el portal",
@@ -37,7 +37,7 @@ class Job:
     slot_at: datetime  # UTC
     mode: str
     on_free: str | None
-    dry_run: bool
+    dry_run: bool  # solo jobs antiguos: el modo prueba ya no existe
     status: str
     result_message: str | None = None
 
@@ -81,7 +81,6 @@ def create_job(
     slot_at: datetime,
     mode: str,
     on_free: str | None,
-    dry_run: bool,
     source_job_id: int | None = None,
 ) -> int:
     if slot_at.tzinfo is None:
@@ -99,7 +98,7 @@ def create_job(
             slot_at.astimezone(UTC).isoformat(),
             mode,
             on_free if mode == "observar" else None,
-            int(dry_run),
+            0,  # dry_run: el modo prueba ya no existe (la columna queda para el historial)
             now,
             now,
             source_job_id,
@@ -117,7 +116,7 @@ def create_watch_from(conn: sqlite3.Connection, job: Job, on_free: str = "reserv
         return existing["id"]
     return create_job(
         conn, job.profile_id, job.center_id, job.center, job.activity, job.service,
-        job.slot_at, "observar", on_free, job.dry_run, source_job_id=job.id,
+        job.slot_at, "observar", on_free, source_job_id=job.id,
     )
 
 
@@ -195,7 +194,6 @@ FILTERS = {
     "programadas": "Programadas",
     "conseguidas": "Conseguidas",
     "fallidas": "Fallidas",
-    "pruebas": "Pruebas",
     "anuladas": "Anuladas",
     "todas": "Todas",
 }
@@ -219,8 +217,6 @@ def matches_filter(job: Job, name: str, now: datetime) -> bool:
         return job.status in ("reservado", "revisar")
     if name == "fallidas":
         return job.status in ("fallido", "expirado")
-    if name == "pruebas":
-        return job.dry_run
     if name == "anuladas":
         return job.status in ("anulado", "cancelado")
     return True  # «todas»
@@ -244,11 +240,3 @@ def delete_job(conn: sqlite3.Connection, job_id: int, profile_id: int) -> bool:
     conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))  # attempts: ON DELETE CASCADE
     return True
 
-
-def delete_tests(conn: sqlite3.Connection, profile_id: int) -> int:
-    """Borra todas las pruebas terminadas del perfil. Devuelve cuántas."""
-    deleted = 0
-    for job in list_jobs(conn, profile_id):
-        if job.dry_run and delete_job(conn, job.id, profile_id):
-            deleted += 1
-    return deleted

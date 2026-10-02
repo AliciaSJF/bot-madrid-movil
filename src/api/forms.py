@@ -30,7 +30,9 @@ class ProfileForm:
         if self.color not in profiles_repo.COLORS:
             return "Elige un color de la lista."
         if not self.portal_username or not portal_password:
-            return "Faltan el usuario o la contraseña del portal."
+            return "Faltan el email o la contraseña del portal."
+        if "@" not in self.portal_username:
+            return "Pon el email con el que entras en Madrid Móvil."
         if profiles_repo.name_exists(conn, self.display_name):
             return "Ya hay un perfil con ese nombre."
         return None
@@ -47,7 +49,6 @@ class BookingForm:
     slot_time: str = ""
     mode: str = "reservar"
     on_free: str = "reservar"
-    dry_run: bool = True
 
     def slot_at(self, zone: ZoneInfo) -> datetime | None:
         """Fecha y hora del turno con zona horaria, o None si no se pueden leer."""

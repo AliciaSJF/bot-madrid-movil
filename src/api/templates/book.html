@@ -65,26 +65,19 @@
     </select>
   </label>
 
-  <label class="check">
-    <input type="checkbox" name="dry_run" value="true" {% if values.dry_run or forced_dry_run %}checked{% endif %} {% if forced_dry_run %}disabled{% endif %}>
-    <span>Modo prueba: recorre todo sin confirmar la reserva
-      {% if forced_dry_run %}<small>Activado en el servidor (DRY_RUN=true).</small>{% endif %}
-    </span>
-  </label>
-
-  <button class="btn btn-primary" type="submit" id="submit-booking">Programar</button>
+  <button class="btn btn-primary" type="submit" id="submit-booking"
+          data-reservar="{{ 'Planificar reserva' if slot.status == 'sin_abrir' else 'Reservar ahora' }}"
+          data-observar="Observar el turno">Reservar</button>
 </form>
 <script>
-  // Que el botón diga claramente si es una prueba o una reserva real (que cobra del monedero)
+  // El botón dice lo que va a pasar según la opción elegida
   (() => {
-    const box = document.querySelector('input[name="dry_run"]');
     const button = document.getElementById("submit-booking");
     const update = () => {
-      const test = box.checked;
-      button.textContent = test ? "Programar prueba (no reserva)" : "Programar reserva REAL";
-      button.classList.toggle("btn-real", !test);
+      const mode = document.querySelector('input[name="mode"]:checked')?.value || "reservar";
+      button.textContent = button.dataset[mode];
     };
-    box.addEventListener("change", update);
+    document.querySelectorAll('input[name="mode"]').forEach((radio) => radio.addEventListener("change", update));
     update();
   })();
 </script>

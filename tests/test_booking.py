@@ -117,7 +117,7 @@ class FakeSession:
 
 @pytest.fixture
 def settings(tmp_path):
-    s = Settings(_env_file=None, data_dir=tmp_path, fernet_key=Fernet.generate_key().decode(), dry_run=False)
+    s = Settings(_env_file=None, data_dir=tmp_path, fernet_key=Fernet.generate_key().decode())
     init_db(s.data_dir)
     conn = connect(s.data_dir)
     profiles_repo.create_profile(conn, "Alicia", "#0f766e", "a@example.com", crypto.encrypt(s, "clave-portal"))
@@ -136,10 +136,10 @@ def sent(monkeypatch):
     return messages
 
 
-def make_job(settings, mode="reservar", dry_run=False, on_free=None, status=None):
+def make_job(settings, mode="reservar", on_free=None, status=None):
     conn = connect(settings.data_dir)
     job_id = jobs_repo.create_job(conn, 1, 58, "Daoíz y Velarde", "Nado libre · Calle central", "piscina",
-                                  SLOT, mode, on_free or "reservar", dry_run)
+                                  SLOT, mode, on_free or "reservar")
     if status:
         jobs_repo.set_status(conn, job_id, status)
     conn.commit()
@@ -177,9 +177,12 @@ def test_prepares_early_and_clicks_exactly_at_opening(settings, sent):
     assert session.click_times[0] == OPENS  # ni antes ni después
     assert session.confirmed
     job, attempts = job_of(settings, 1)
-    assert job.status == "reservado" and "4,00 €" in job.result_message
+    assert job.status == "reservado"
+    assert job.result_message == "Pagada con el monedero (4,00 €). Saldo: 16,00 €."
     assert [a.action for a in attempts] == ["sesion", "preparar", "pulsar #1", "confirmar"]
-    assert sent[-1][0].startswith("✅ Reserva conseguida") and sent[-1][1] is None
+    text, buttons = sent[-1]
+    assert text.startswith("✅ Reserva confirmada") and buttons is None
+    assert "💳 Pagada con el monedero: 4,00 €" in text and "💰 Saldo del monedero: 16,00 €" in text
 
 
 def test_retries_until_in_cart(settings, sent):
@@ -247,20 +250,17 @@ def test_unclear_result_asks_to_check(settings, sent):
     assert "Revísalo en Madrid Móvil" in sent[-1][0]
 
 
-def test_dry_run_never_clicks_the_slot(settings, sent):
+def test_old_test_job_still_scheduled_is_never_run_for_real(settings, sent):
+    """El modo prueba ya no existe: una prueba antigua que siguiera programada se cancela, no se reserva."""
     clock = FakeClock(OPENS - timedelta(seconds=60))
     session = FakeSession(clock)
-    assert run(settings, make_job(settings, dry_run=True), session, clock) == "prueba_ok"
+    job_id = make_job(settings)
+    conn = connect(settings.data_dir)
+    conn.execute("UPDATE jobs SET dry_run = 1 WHERE id = ?", (job_id,))
+    conn.commit()
+    conn.close()
+    assert run(settings, job_id, session, clock) == "cancelado"
     assert session.click_times == [] and not session.confirmed
-    assert sent[-1][0].startswith("🧪 Prueba superada")
-
-
-def test_server_dry_run_wins_over_job(settings, sent):
-    clock = FakeClock(OPENS - timedelta(seconds=60))
-    session = FakeSession(clock)
-    forced = settings.model_copy(update={"dry_run": True})
-    assert run(forced, make_job(settings, dry_run=False), session, clock) == "prueba_ok"
-    assert session.click_times == []
 
 
 def test_cancelled_while_running_does_not_confirm(settings, sent):
@@ -458,7 +458,7 @@ def test_two_bookings_at_the_same_opening_run_in_parallel(settings, monkeypatch)
     profiles_repo.create_profile(conn, "Novio", "#1d4ed8", "b@example.com", crypto.encrypt(settings, "x"))
     conn.commit()
     for pid in (1, 2):
-        jobs_repo.create_job(conn, pid, 58, "Daoíz y Velarde", "Nado libre · Calle central", "piscina", SLOT, "reservar", None, False)
+        jobs_repo.create_job(conn, pid, 58, "Daoíz y Velarde", "Nado libre · Calle central", "piscina", SLOT, "reservar", None)
     conn.commit()
     conn.close()
 
@@ -637,14 +637,6 @@ def test_other_things_in_cart_before_opening_warn_and_still_click_on_time(settin
     assert any(text.startswith("⚠️ Carrito pendiente") for text, _ in sent)
 
 
-def test_dry_run_never_pays_a_cart_found_before_opening(settings, sent):
-    clock = FakeClock(OPENS - timedelta(seconds=60))
-    session = FakeSession(clock)
-    session.pending = 1
-    assert run(settings, make_job(settings, dry_run=True), session, clock) == "prueba_ok"
-    assert not session.confirmed
-
-
 def test_closed_browser_stops_at_once(settings, sent):
     from src.portal.errors import BrowserClosed
 
@@ -693,7 +685,10 @@ def test_pass_covered_cart_is_confirmed_without_payment_method(settings, sent):
     assert run(settings, make_job(settings), session, clock) == "reservado"
     assert session.confirmed
     job, _ = job_of(settings, 1)
-    assert job.result_message == "Confirmado con tu abono (sin pagar nada, carrito 8125509951)."
+    assert job.result_message == "Con tu bono mensual."
+    text = sent[-1][0]
+    assert text.startswith("✅ Reserva confirmada") and "🎫 Con tu bono mensual" in text
+    assert "carrito" not in text.lower() and "pagad" not in text.lower() and "€" not in text
 
 
 @pytest.mark.parametrize(
@@ -735,7 +730,7 @@ def test_one_booking_at_a_time_per_profile(settings, sent, monkeypatch, profiles
     conn = connect(settings.data_dir)
     profiles_repo.create_profile(conn, "Novio", "#1d4ed8", "b@example.com", crypto.encrypt(settings, "clave-portal"))
     ids = [jobs_repo.create_job(conn, pid, 58, "Daoíz y Velarde", "Nado libre · Calle central", "piscina",
-                                SLOT, "reservar", None, False) for pid in profiles]
+                                SLOT, "reservar", None) for pid in profiles]
     conn.commit()
     conn.close()
 

@@ -31,16 +31,36 @@
   </fieldset>
 
   <fieldset class="card">
-    <legend>Cuenta de la Comunidad de Madrid</legend>
-    <p class="hint">La que usas en deportesweb.madrid.es. La contraseña se guarda cifrada y no se vuelve a mostrar.</p>
-    <label>Usuario del portal
-      <input type="text" name="portal_username" value="{{ values.portal_username or '' }}" autocomplete="off" autocapitalize="none" spellcheck="false" required>
-    </label>
+    <legend>Cuenta de Madrid Móvil</legend>
+    <div class="field">
+      <div class="field-label">
+        <label for="portal_username">Email del portal</label>
+        <button class="info-btn" type="button" aria-expanded="false" aria-controls="portal-help" aria-label="¿Qué cuenta es?">i</button>
+      </div>
+      <p class="info-text" id="portal-help" hidden>
+        Es el <strong>email y la contraseña con los que entras en la app Madrid Móvil</strong>
+        (o en la web deportesweb.madrid.es del Ayuntamiento). El bot entra con ellos para reservar por ti.
+      </p>
+      <input type="email" id="portal_username" name="portal_username" value="{{ values.portal_username or '' }}"
+             inputmode="email" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="tu@email.com" required>
+    </div>
     <label>Contraseña del portal
       <input type="password" name="portal_password" autocomplete="new-password" required>
     </label>
+    <p class="hint">La contraseña se guarda cifrada y no se vuelve a mostrar.</p>
   </fieldset>
 
   <button class="btn btn-primary" type="submit" {% if key_missing %}disabled{% endif %}>Crear perfil</button>
 </form>
+<script>
+  // Botón «i»: muestra u oculta la explicación de qué cuenta hay que poner
+  document.querySelectorAll(".info-btn").forEach((button) => {
+    const help = document.getElementById(button.getAttribute("aria-controls"));
+    button.addEventListener("click", () => {
+      const open = button.getAttribute("aria-expanded") !== "true";
+      button.setAttribute("aria-expanded", String(open));
+      help.hidden = !open;
+    });
+  });
+</script>
 {% endblock %}

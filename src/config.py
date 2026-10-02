@@ -17,9 +17,6 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data")
     tz: str = "Europe/Madrid"
 
-    # Por defecto nunca se confirma una reserva real
-    dry_run: bool = True
-
     # Respeto al portal: la vigilancia nunca consulta más a menudo que esto
     watch_min_interval_s: int = Field(default=30, ge=30)
     max_active_watches: int = Field(default=3, ge=1)

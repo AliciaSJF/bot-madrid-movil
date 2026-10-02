@@ -159,7 +159,7 @@ def test_book_and_list_jobs(client, settings):
     page = client.get("/reservas").text
     assert "La Chopera" in page
     assert "Observar plazas libres" in page
-    assert "Prueba" in page  # dry_run por defecto en el servidor
+    assert "Prueba" not in page  # el modo prueba ya no existe
 
 
 def test_booking_in_the_past_is_rejected(client, settings):
@@ -190,7 +190,7 @@ def test_cancel_only_own_active_jobs(client, settings):
 
     client.post("/reservas/1/cancelar")
     client.post("/perfiles/1/elegir")
-    assert "Pendiente" in client.get("/reservas").text
+    assert "Planificada" in client.get("/reservas").text
 
     client.post("/reservas/1/cancelar")
     assert "Cancelado" in client.get("/reservas").text
@@ -322,3 +322,50 @@ def test_pwa_files_are_served(client):
     assert client.get("/manifest.webmanifest").headers["content-type"].startswith("application/manifest+json")
     assert client.get("/sw.js").status_code == 200
     assert client.get("/static/icon-192.png").status_code == 200
+
+
+def test_messages_say_what_will_happen(client, settings, monkeypatch):
+    """Planificar (aún no abre) no es lo mismo que reservar ya (está abierto) ni que observar."""
+    started = []
+
+    class FakeWorker:
+        def start_booking(self, job_id):
+            started.append(job_id)
+
+    monkeypatch.setattr("src.api.routers.booking.current_worker", lambda: FakeWorker())
+    setup_house(client)
+    create_profile(client)
+
+    book(client, settings, days=4)  # abre dentro de unos días
+    page = client.get("/reservas").text
+    assert "Reserva planificada para el" in page and "cuando abra el turno" in page
+    assert "Planificada" in page and "Se reservará en cuanto abra" in page
+    assert started == []  # la lanza el programador un minuto antes de abrir
+
+    book(client, settings, days=1)  # ya está abierto: se reserva ahora mismo
+    assert "Reservando ahora" in client.get("/reservas").text
+    assert started == [2]
+
+    book(client, settings, days=1, mode="observar")
+    assert "Vigilando el turno" in client.get("/reservas").text
+    assert started == [2]
+
+
+def test_profile_asks_for_the_madrid_movil_email(client):
+    setup_house(client)
+    page = client.get("/perfiles/nuevo").text
+    assert "Email del portal" in page and "app Madrid Móvil" in page and 'class="info-btn"' in page
+    r = client.post("/perfiles/nuevo", data={"display_name": "Alicia", "color": "#0f766e",
+                                             "portal_username": "alicia", "portal_password": "x"})
+    assert r.status_code == 400 and "Pon el email con el que entras en Madrid Móvil" in r.text
+
+
+def test_center_list_explains_the_first_sync(client, settings):
+    setup_house(client)
+    create_profile(client)
+    page = client.get("/reservar/multitrabajo").text
+    assert "Sincronizar con el portal" in page and "solo hace falta una vez" in page
+    seed_centers(settings)
+    page = client.get("/reservar/multitrabajo").text
+    assert "Sincronizar con el portal" not in page
+    assert 'class="icon-btn refresh-btn"' in page and page.index("refresh-btn") < page.index("center-list")

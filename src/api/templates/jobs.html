@@ -3,7 +3,7 @@
 {% block heading %}Mis reservas{% endblock %}
 
 {% macro job_card(job) %}
-<li class="card job{% if not job.is_active %} is-done{% endif %}">
+<li class="card job{% if not job.is_active and job.status not in ("reservado", "revisar") %} is-done{% endif %}">
   <div class="job-head">
     <span class="job-service">{{ SERVICES[job.service] }}</span>
     <span class="badge badge-{{ job.status }}">{{ STATUS_LABELS[job.status] }}</span>
@@ -13,7 +13,6 @@
   {% if job.result_message %}<p class="job-result">{{ job.result_message }}</p>{% endif %}
   <p class="job-meta">
     {{ MODES[job.mode] }}{% if job.mode == "observar" and job.on_free %} · {{ ON_FREE[job.on_free] | lower }}{% endif %}
-    {% if job.dry_run %}<span class="badge badge-test">Prueba</span>{% endif %}
   </p>
   <div class="job-actions">
     {% if job.is_active %}
@@ -47,14 +46,11 @@
 <script>
   // Que el filtro elegido se vea aunque esté al final de la tira
   document.querySelector(".filter.is-active")?.scrollIntoView({ inline: "center", block: "nearest" });
+  {% if live %}
+  // Hay una reserva en marcha: se refresca sola hasta que termine
+  setTimeout(() => location.reload(), 3000);
+  {% endif %}
 </script>
-
-{% if current_filter == "pruebas" and deletable_tests %}
-<form method="post" action="/reservas/eliminar-pruebas?filtro=pruebas" class="bulk"
-      onsubmit="return confirm('¿Eliminar todas las pruebas terminadas ({{ deletable_tests }})?')">
-  <button class="btn btn-ghost" type="submit">Eliminar todas las pruebas ({{ deletable_tests }})</button>
-</form>
-{% endif %}
 
 {% if not upcoming and not past %}
 <div class="empty">

@@ -5,10 +5,9 @@ from src.config import Settings
 
 
 def test_defaults_are_safe(monkeypatch):
-    for var in ("DRY_RUN", "WATCH_MIN_INTERVAL_S", "TZ"):
+    for var in ("WATCH_MIN_INTERVAL_S", "TZ"):
         monkeypatch.delenv(var, raising=False)
     settings = Settings(_env_file=None)
-    assert settings.dry_run is True
     assert settings.watch_min_interval_s == 30
     assert settings.zone.key == "Europe/Madrid"
 

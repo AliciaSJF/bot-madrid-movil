@@ -19,12 +19,14 @@ from src import portal
 from src.api.deps import CurrentProfile, HouseConn, SettingsDep, redirect
 from src.api.forms import BookingForm
 from src.api.templating import flash, render
+from src.core import booking as core_booking
 from src.core import slots as core_slots
 from src.core.centers import refresh_centers
 from src.core.prefetch import schedule_prefetch
 from src.db import centers as centers_repo
 from src.db import jobs as jobs_repo
 from src.db import slots as slots_repo
+from src.worker.scheduler import current_worker
 
 router = APIRouter(prefix="/reservar")
 
@@ -170,12 +172,11 @@ def confirm_submit(
     mode: Annotated[str, Form()],
     activity: Annotated[str, Form()] = "",
     on_free: Annotated[str, Form()] = "reservar",
-    dry_run: Annotated[bool, Form()] = False,
 ) -> Response:
     center = centers_repo.get_center(conn, center_id, service)
     if center is None:
         return redirect(f"/reservar/{service}")
-    form = BookingForm(slot_date, slot_time, mode, on_free, dry_run)
+    form = BookingForm(slot_date, slot_time, mode, on_free)
 
     error = form.validate(settings.zone)
     slot_at = form.slot_at(settings.zone)
@@ -186,7 +187,7 @@ def confirm_submit(
             return redirect(f"/reservar/{service}/{center_id}")
         return _render_confirm(request, profile, settings, service, center, slot, form, error, 400)
 
-    jobs_repo.create_job(
+    job_id = jobs_repo.create_job(
         conn,
         profile_id=profile.id,
         center_id=center.portal_id,
@@ -196,11 +197,22 @@ def confirm_submit(
         slot_at=slot_at,
         mode=form.mode,
         on_free=form.on_free,
-        # Con DRY_RUN=true en el servidor nunca se programa una reserva real
-        dry_run=form.dry_run or settings.dry_run,
     )
+    job = jobs_repo.get_job(conn, job_id)
+    if form.mode == "observar":
+        message = "Vigilando el turno: te aviso por Telegram si se libera una plaza."
+    elif slot.status == "sin_abrir":
+        jobs_repo.set_status(conn, job_id, "esperando_apertura", core_booking.planned_message(settings, job))
+        opens = slot.opens_at
+        message = (f"Reserva planificada para el {core_booking.short_day(opens)} a las {opens:%H:%M}, cuando abra "
+                   "el turno. Te aviso por Telegram con el resultado.")
+    else:
+        message = "Reservando ahora: en unos segundos verás aquí si se ha confirmado (y te llegará por Telegram)."
     conn.commit()
-    flash(request, "Reserva programada.")
+    worker = current_worker()
+    if form.mode == "reservar" and slot.status != "sin_abrir" and worker is not None:
+        worker.start_booking(job_id)  # ya está abierto: sin esperar a la siguiente vuelta del programador
+    flash(request, message)
     return redirect("/reservas")
 
 
@@ -225,7 +237,6 @@ def _render_confirm(
         service=service,
         center=center,
         slot=slot,
-        forced_dry_run=settings.dry_run,
         error=error,
         values=form.values(),
     )

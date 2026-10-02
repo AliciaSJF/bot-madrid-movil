@@ -8,6 +8,7 @@ from fastapi.responses import Response
 
 from src.api.deps import CurrentProfile, HouseConn, SettingsDep, redirect
 from src.api.templating import flash, render
+from src.core import booking as core_booking
 from src.core import cancel as core_cancel
 from src.db import jobs as jobs_repo
 
@@ -40,8 +41,15 @@ def list_jobs(
         past=past,
         cancellable={j.id for j in shown if core_cancel.can_cancel(j, now)},
         deletable={j.id for j in shown if jobs_repo.is_deletable(j)},
-        deletable_tests=sum(1 for j in everything if j.dry_run and jobs_repo.is_deletable(j)),
+        live=any(_running_now(settings, j, now) for j in shown),
     )
+
+
+def _running_now(settings, job: jobs_repo.Job, now: datetime) -> bool:
+    """¿Está reservando ahora (o a punto)? Entonces la lista se refresca sola hasta ver el resultado."""
+    if job.status in ("reservando", "plaza_liberada"):
+        return True
+    return job.mode == "reservar" and job.status in ("pendiente", "esperando_apertura")         and core_booking.opening_of(settings, job) - core_booking.PREPARE_BEFORE <= now
 
 
 def _back(filtro: str) -> str:
@@ -69,7 +77,7 @@ def annul(
 
 @router.post("/{job_id}/eliminar")
 def delete(request: Request, conn: HouseConn, profile: CurrentProfile, job_id: int, filtro: str = "") -> Response:
-    """Borra de la lista una programación terminada (pruebas, fallidas…). No toca el portal."""
+    """Borra de la lista una programación terminada (fallidas, canceladas…). No toca el portal."""
     if jobs_repo.delete_job(conn, job_id, profile.id):
         conn.commit()
         flash(request, "Eliminada de la lista.")
@@ -77,10 +85,3 @@ def delete(request: Request, conn: HouseConn, profile: CurrentProfile, job_id: i
         flash(request, "Esa programación no se puede eliminar (está en marcha o es una reserva conseguida).")
     return redirect(_back(filtro))
 
-
-@router.post("/eliminar-pruebas")
-def delete_tests(request: Request, conn: HouseConn, profile: CurrentProfile, filtro: str = "") -> Response:
-    deleted = jobs_repo.delete_tests(conn, profile.id)
-    conn.commit()
-    flash(request, f"{deleted} prueba(s) eliminada(s)." if deleted else "No había pruebas terminadas que eliminar.")
-    return redirect(_back(filtro))

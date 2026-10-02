@@ -98,7 +98,7 @@ class Worker:
                     continue
                 opens = core_booking.opening_of(self.settings, job)
                 if job.status == "pendiente" and now < opens - core_booking.PREPARE_BEFORE:
-                    jobs_repo.set_status(conn, job.id, "esperando_apertura", f"Abre el {opens:%d/%m a las %H:%M}.")
+                    jobs_repo.set_status(conn, job.id, "esperando_apertura", core_booking.planned_message(self.settings, job))
                     conn.commit()
                 if now >= opens - core_booking.PREPARE_BEFORE:
                     self.start_booking(job.id)

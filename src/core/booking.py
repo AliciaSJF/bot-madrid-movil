@@ -11,9 +11,6 @@ Cronología de un turno que abre a las T (T = inicio − 49 h):
     carrito    un solo elemento, que sea este turno, y monedero con saldo ≥ total o ninguna forma de
                pago (lo cubre el abono) → «Confirmar la compra»
 
-Modo prueba: todo igual hasta T, pero no pulsa el turno (pulsarlo ya lo mete en el carrito);
-solo comprueba que a esa hora se podía pulsar.
-
 Una reserva a la vez por perfil (el carrito y la sesión del portal son de la persona).
 
 Siempre termina con un aviso por Telegram. Si no se consigue por falta de plazas, el aviso ofrece
@@ -21,7 +18,6 @@ Siempre termina con un aviso por Telegram. Si no se consigue por falta de plazas
 """
 
 import logging
-import re
 import sqlite3
 import threading
 import time as time_module
@@ -84,7 +80,18 @@ def slot_label(settings: Settings, job: jobs_repo.Job) -> str:
     start = job.slot_at.astimezone(settings.zone)
     lane = f" · {job.activity.split(' · ', 1)[1]}" if " · " in job.activity else ""
     service = jobs_repo.SERVICES[job.service]
-    return f"{service} · {job.center}{lane} · {WEEKDAYS[start.weekday()]} {start.day} {MONTHS[start.month - 1]} {start:%H:%M}"
+    return f"{service} · {job.center}{lane} · {short_day(start)} {start:%H:%M}"
+
+
+def short_day(moment: datetime) -> str:
+    """«sáb 4 oct»."""
+    return f"{WEEKDAYS[moment.weekday()]} {moment.day} {MONTHS[moment.month - 1]}"
+
+
+def planned_message(settings: Settings, job: jobs_repo.Job) -> str:
+    """Lo que se ve en la app mientras una reserva espera a que abra el turno."""
+    opens = opening_of(settings, job)
+    return f"Se reservará en cuanto abra: {short_day(opens)} a las {opens:%H:%M}."
 
 
 def opening_of(settings: Settings, job: jobs_repo.Job) -> datetime:
@@ -146,6 +153,11 @@ def run_booking(settings: Settings, job_id: int, clock: Clock | None = None) -> 
 
 def _run(conn: sqlite3.Connection, settings: Settings, job_id: int, clock: Clock) -> str:
     job = jobs_repo.get_job(conn, job_id)
+    if job is not None and job.dry_run and job.is_active:
+        # Ya no hay modo prueba (02/10): una prueba antigua que siguiera programada no se vuelve real
+        jobs_repo.set_status(conn, job_id, "cancelado", "Era una prueba: el modo prueba ya no existe.", only_if=STARTABLE)
+        conn.commit()
+        return "cancelado"
     if job is None or not jobs_repo.set_status(conn, job_id, "reservando", only_if=STARTABLE):
         return job.status if job else "desconocido"
     conn.commit()
@@ -155,7 +167,6 @@ def _run(conn: sqlite3.Connection, settings: Settings, job_id: int, clock: Clock
     start = job.slot_at.astimezone(zone)
     opens = opening_of(settings, job)
     day, at = start.date(), start.time()
-    dry_run = job.dry_run or settings.dry_run
     capture_dir = settings.data_dir / "capturas" / "reservas" / f"job{job.id}"
 
     password = crypto.decrypt(settings, profiles_repo.get_portal_password_enc(conn, profile.id))
@@ -173,7 +184,7 @@ def _run(conn: sqlite3.Connection, settings: Settings, job_id: int, clock: Clock
             pending = session.cart_count()
             if pending:
                 _attempt(conn, job.id, "carrito previo", "aviso", f"el carrito tiene {pending} elemento(s) antes de la apertura")
-                in_cart = _check_cart(conn, settings, job, session, day, at, warn=True) == "este_turno" and not dry_run
+                in_cart = _check_cart(conn, settings, job, session, day, at, warn=True) == "este_turno"
                 if not in_cart:
                     _back_to_slot(conn, job, session, day)
 
@@ -182,9 +193,6 @@ def _run(conn: sqlite3.Connection, settings: Settings, job_id: int, clock: Clock
             target = opens - portal_clock_lead(offset)
             if not in_cart and clock.now() < target:
                 clock.wait_until(target)
-
-            if dry_run:
-                return _dry_run(conn, settings, job, session, at, clock)
 
             if not in_cart:
                 in_cart, reason = _click_until_in_cart(conn, settings, job, session, at, day, clock)
@@ -208,12 +216,12 @@ def _run(conn: sqlite3.Connection, settings: Settings, job_id: int, clock: Clock
             result = session.confirm_purchase(cart)
             _attempt(conn, job.id, "confirmar", result.status, result.message)
             if result.status == "reservado":
-                details = ["sin pagar nada" if cart.covered_by_pass else euros(cart.total)]
-                reference = re.search(r"\(((?:operación|carrito) \d+)\)", result.message)
-                if reference:
-                    details.append(reference.group(1))
-                how = "Confirmado con tu abono" if cart.covered_by_pass else "Pagado con el monedero"
-                return _finish(conn, settings, job.id, "reservado", f"{how} ({', '.join(details)}).")
+                if cart.covered_by_pass:
+                    return _finish(conn, settings, job.id, "reservado", "Con tu bono mensual.", ["🎫 Con tu bono mensual"])
+                balance = cart.wallet_balance - cart.total
+                return _finish(conn, settings, job.id, "reservado",
+                               f"Pagada con el monedero ({euros(cart.total)}). Saldo: {euros(balance)}.",
+                               [f"💳 Pagada con el monedero: {euros(cart.total)}", f"💰 Saldo del monedero: {euros(balance)}"])
             if result.status == "pasarela":
                 return _finish(conn, settings, job.id, "fallido",
                                "El portal pidió pagar con tarjeta: no he seguido. Revisa el monedero.", offer_watch=False)
@@ -227,19 +235,6 @@ def _run(conn: sqlite3.Connection, settings: Settings, job_id: int, clock: Clock
     except portal.PortalError as exc:
         _attempt(conn, job.id, "portal", "error", str(exc))
         return _finish(conn, settings, job.id, "fallido", str(exc), offer_watch=True)
-
-
-def _dry_run(conn, settings, job, session, at, clock) -> str:
-    session.refresh_day()
-    state = session.slot_state(at, job.activity)
-    moment = clock.now().strftime("%H:%M:%S")
-    if state.found and state.selectable:
-        _attempt(conn, job.id, "prueba", "ok", f"se podía pulsar a las {moment} ({state.free}/{state.total} libres)")
-        return _finish(conn, settings, job.id, "prueba_ok",
-                       f"Prueba: a las {moment} el turno se podía pulsar ({state.free}/{state.total} libres). No se ha reservado.")
-    _attempt(conn, job.id, "prueba", "no", f"a las {moment} el turno no se podía pulsar")
-    return _finish(conn, settings, job.id, "fallido",
-                   f"Prueba: a las {moment} el turno no se podía pulsar (completo o no aparece).", offer_watch=True)
 
 
 def _prepare_with_retries(conn, job, session, username, password, day, opens, clock) -> None:
@@ -414,21 +409,23 @@ def _attempt(conn, job_id, action, result, message="") -> None:
     conn.commit()
 
 
-ICONS = {"reservado": "✅", "prueba_ok": "🧪", "revisar": "⚠️", "fallido": "❌"}
+TITLES = {
+    "reservado": "✅ Reserva confirmada",
+    "revisar": "⚠️ Reserva por comprobar",
+    "fallido": "❌ No se pudo reservar",
+}
 
 
-def _finish(conn, settings, job_id: int, status: str, message: str, offer_watch: bool = False) -> str:
+def _finish(conn, settings, job_id: int, status: str, message: str, lines: list[str] | None = None,
+            offer_watch: bool = False) -> str:
+    """Guarda el estado final y avisa por Telegram. message es lo que se ve en la app; lines, si las
+    hay, lo sustituyen en Telegram (una por línea)."""
     jobs_repo.set_status(conn, job_id, status, message)
     conn.commit()
     job = jobs_repo.get_job(conn, job_id)
-    title = {
-        "reservado": "Reserva conseguida",
-        "prueba_ok": "Prueba superada",
-        "revisar": "Reserva por comprobar",
-        "fallido": "No se pudo reservar",
-    }[status]
     buttons = None
     if offer_watch and job.mode == "reservar" and job.slot_at > datetime.now(job.slot_at.tzinfo):
         buttons = [("👀 Observar", f"obs:{job.id}"), ("Ignorar", f"ign:{job.id}")]
-    notify(conn, settings, job.profile_id, f"{ICONS[status]} {title}\n{slot_label(settings, job)}\n{message}", buttons)
+    body = "\n".join(lines) if lines else message
+    notify(conn, settings, job.profile_id, f"{TITLES[status]}\n{slot_label(settings, job)}\n{body}", buttons)
     return status

@@ -49,7 +49,7 @@ def booked_job(settings, profile_id=1, status="reservado", days=3):
     conn = connect(settings.data_dir)
     slot = (datetime.now(MADRID) + timedelta(days=days)).replace(hour=19, minute=0, second=0, microsecond=0)
     job_id = jobs_repo.create_job(conn, profile_id, 86, "Juan de Dios Román", "SALA MUSCULACION", "multitrabajo",
-                                  slot, "reservar", None, False)
+                                  slot, "reservar", None)
     jobs_repo.set_status(conn, job_id, status)
     conn.commit()
     conn.close()
@@ -153,4 +153,16 @@ def test_cancel_waits_for_a_booking_of_the_same_profile(settings, sent, monkeypa
         outcome = core_cancel.cancel_booking(conn, settings, job_id, 1)
     assert not outcome.ok and "otra reserva tuya" in outcome.message
     assert jobs_repo.get_job(conn, job_id).status == "reservado"
+    conn.close()
+
+
+def test_cancel_message_always_shows_the_balance_and_the_pass(settings, sent, monkeypatch):
+    job_id, _ = booked_job(settings)
+    conn = connect(settings.data_dir)
+    conn.execute("UPDATE jobs SET result_message = 'Con tu bono mensual.' WHERE id = ?", (job_id,))
+    conn.commit()
+    monkeypatch.setattr(portal, "cancel_reservation", lambda *a: CancelResult("anulado", "Anulada en el portal.", None))
+    assert core_cancel.cancel_booking(conn, settings, job_id, 1).ok
+    text = sent[-1][1]
+    assert "🎫 Era con tu bono mensual" in text and "💰 Saldo del monedero: no lo he podido leer" in text
     conn.close()

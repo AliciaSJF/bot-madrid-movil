@@ -73,7 +73,7 @@ def _wait_for_login_result(page: Page) -> None:
         if sel.HOME_PATH in page.url:
             return
         if page.get_by_text(sel.LOGIN_ERROR_TEXT).count():
-            raise LoginRejected("El portal dice que el usuario o la contraseña no son válidos.")
+            raise LoginRejected("El portal dice que el email o la contraseña no son válidos.")
         if _verification_requested(page):
             raise VerificationRequired("El portal pide una verificación adicional. Entra una vez a mano.")
         _stop_if_captcha(page)

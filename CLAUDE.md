@@ -68,7 +68,7 @@ La mayoría de las veces se usará desde el móvil; el ordenador es secundario.
 4. Lanzar la reserva en el momento de apertura del turno (solo modo `reservar`; ver reglas del portal), con la sesión ya iniciada y la página lista.
 5. Ver y gestionar las reservas programadas: estado, historial de intentos, cancelar una programación.
 6. Notificaciones por Telegram con el resultado.
-7. Modo prueba (`dry_run`) que recorre todo el flujo sin confirmar la reserva final.
+7. ~~Modo prueba (`dry_run`)~~: quitado el 02/10 a petición de la usuaria (confundía). Sirvió para verificar las aperturas el 30/09.
 
 ## 4. Requisitos no funcionales
 
@@ -175,8 +175,7 @@ Esto es lo observado hasta ahora. Se irá ampliando; marca como **verificado** l
 - Un turno que se queda en el carrito aparece en *Mi cuenta → Entradas de uso libre* como **«Pendiente»** y bloquea volver a pulsarlo: «La sesión seleccionada no permite más de 1 reserva(s) por persona.» El bot entonces **retoma el carrito** con el enlace de la cabecera `#aCarrito` (abrir la URL a mano no vale) y paga solo si el carrito es solo ese turno. Ese mensaje es definitivo: no se reintenta.
 - El contador del carrito está en la cabecera: `<span id="spnCarrito" class="badge">1</span>` (sin elementos no aparece). El 30/09 a las 18:00, con el portal saturado, un clic tardó 24 s y **metió el turno en el carrito sin ir a la página del carrito**; el bot no lo vio, el turno caducó sin pagar y a las 18:30 todo clic devolvía «La operación no se puede realizar porque el carrito ya está expirado.» hasta que el portal lo limpió solo (a las 19:34 ya estaba vacío). Por eso el bot mira el contador antes de la apertura y tras cada clic, y ante cualquier aviso que diga «carrito» abre el carrito: si es este turno lo paga; si no, avisa por Telegram y sigue intentándolo. Nunca vacía el carrito. Verificado el 02/10: al abrir desde la cabecera un carrito caducado, el portal lleva a `CarritoResultado` con «✖ Expirado» (y el turno) y lo descarta; justo después ya se pudo reservar otro turno. El bot lo trata como «caducado», no avisa y vuelve a pulsar.
 - Con **abono de uso libre** (verificado el 02/10 con dos reservas reales): el carrito no ofrece ninguna forma de pago (ni tarjeta, ni Bizum, ni monedero) y se confirma directamente. El bot lo trata así: 0 formas de pago → confirmar sin elegir nada, siempre que el carrito sea solo ese turno y no pida condiciones. Si tras confirmar sale hacia una pasarela, se para. La página de resultado con abono dice «Confirmado», «Carrito <número>», «ADM USO LIBRE JOVEN 100% (ENTRADA) −5,00 €» y Total 0,00 €, **sin «Operación»**: el bot acepta «Confirmado» + número de carrito. Sin aclarar: el 02/10 el job 27 (sáb 16:00) recibió durante 2 min «No se permiten más de 1 reservas por persona para cada día» (ya había otra el sábado a las 14:00 y quizá un turno pendiente en el carrito) y al clic 73 entró y se confirmó: el límite parece contar lo pendiente en el carrito, no lo ya confirmado. Desde el 02/10 el bot guarda captura (`carrito_no_valido`) cuando un carrito no le cuadra.
-- **Modo prueba:** todo igual hasta T, pero no pulsa el turno (pulsar ya lo mete en el carrito); comprueba que se podía pulsar. Probado en real el 30/09 (turno 02/10 18:00, abría 17:00).
-- `DRY_RUN=true` en el servidor fuerza modo prueba en todo.
+- **Modo prueba:** quitado el 02/10 (la usuaria lo encontraba confuso). La columna `jobs.dry_run` queda solo para el historial; si una prueba antigua sigue programada, el bot la cancela en vez de reservar. `DRY_RUN` en `.env` ya no hace nada.
 - Siempre avisa por Telegram. Si no hay plaza, el aviso trae [👀 Observar] [Ignorar]; «Observar» crea una vigilancia del mismo turno (`on_free=reservar`). Vigilancias con `avisar` mandan [Reservar ahora].
 - Cerca de una apertura (±2 min alrededor de la preparación) no corren precarga ni vigilancias; las reservas no esperan el candado del navegador.
 
@@ -214,7 +213,6 @@ Esto es lo observado hasta ahora. Se irá ampliando; marca como **verificado** l
   - La contraseña de casa se crea en la primera visita (`/configurar`), se guarda con scrypt de la stdlib y la sesión es una cookie firmada de 60 días. El secreto de la cookie se genera solo y se guarda en la tabla `app_settings`.
   - SQLite con `sqlite3` de la stdlib (sin ORM), esquema en `src/db/database.py`.
   - PWA: `manifest.webmanifest` y `sw.js` servidos desde la raíz; el service worker no cachea nada a propósito.
-  - Si `DRY_RUN=true` en el servidor, todas las programaciones se guardan en modo prueba aunque el formulario diga otra cosa.
   - "Reservar" en cuatro pasos: servicio → polideportivo (lista guardada en la BD, buscador sin tildes, favoritos arriba) → semana con turnos y plazas (foto guardada en `slots`, compartida entre perfiles, se refresca sola si tiene >10 min y como mucho una vez por minuto) → confirmar reservar u observar. La lista se trae del portal con "Actualizar desde el portal" (tablas `centers`, `center_services`, `favorites`).
 - **Estructura de `src/api/`:** los routers solo leen el formulario, llaman a `forms` / `db` y renderizan. La validación va en `forms.py` (se prueba sin levantar la web) y el acceso a datos en `src/db/`. Una pantalla nueva = un router nuevo registrado en `app.py`.
 - **Configuración (hito 1):** `pydantic-settings` lee `.env` / variables de entorno (`src/config.py`). Las dependencias de la web, el scheduler y Telegram se añadirán en su hito, no antes.
@@ -257,7 +255,7 @@ Regla clave: si el portal cambia, solo se toca `src/portal/`. El resto trabaja c
 - **Profile**: id, nombre visible, color, usuario del portal, contraseña del portal cifrada, `telegram_chat_id`. La sesión de Playwright va en `data/sessions/<id>.json`.
 - **Ajustes de la app**: hash de la contraseña de casa y secreto de las cookies de sesión (tabla clave-valor).
 - **Center**: nombre del polideportivo y datos para localizarlo en el portal.
-- **Job**: user, center, service (`multitrabajo` | `piscina`), fecha/hora del turno, `mode` (`reservar` | `observar`), `dry_run`, estado.
+- **Job**: user, center, service (`multitrabajo` | `piscina`), fecha/hora del turno, `mode` (`reservar` | `observar`), estado (`dry_run` solo en jobs antiguos).
 - **BookStrategy** (solo modo `reservar`): `alt_times` (lista ordenada de horas alternativas) y `fallback_watch` (si el turno está completo en la apertura, pasar a observar).
 - **WatchConfig** (modo `observar`, o al pasar a observar desde `reservar`): `on_free` (`reservar` | `avisar`), `interval_s` (mínimo 30), `until` (hora límite), `extra_slots` (otros turnos vigilados a la vez).
 - **Attempt**: job, instante, acción, resultado, mensaje (sin datos sensibles).
@@ -284,7 +282,7 @@ Construir en este orden y probar cada hito antes de pasar al siguiente. El front
 
 ## 10. Reglas para Claude Code
 
-- Nunca hacer una reserva real sin que la usuaria lo pida de forma explícita en ese momento. Por defecto, `dry_run=True`.
+- Nunca hacer una reserva real sin que la usuaria lo pida de forma explícita en ese momento. En la app, pulsar «Reservar ahora» / «Planificar reserva» es esa petición (ya no hay modo prueba desde el 02/10). Claude, por su cuenta, nunca lanza reservas reales al probar: usa los tests con el portal simulado.
 - Nunca commitear secretos ni datos personales: `.env`, `state*.json`, `*.har`, `*.db`, `data/`, capturas con datos de sesión.
 - Los HAR, HTML y respuestas que se usen como fixtures deben estar saneados (contraseñas, cookies, tokens, ViewState, correos y nombres sustituidos).
 - No añadir dependencias pesadas sin justificarlo (la Pi tiene recursos limitados).

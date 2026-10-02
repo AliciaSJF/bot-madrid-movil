@@ -35,7 +35,9 @@ def add(settings, hours, status="pendiente", dry_run=False, profile_id=1, mode="
     conn = connect(settings.data_dir)
     slot = (datetime.now(MADRID) + timedelta(hours=hours)).replace(second=0, microsecond=0)
     job_id = jobs_repo.create_job(conn, profile_id, 58, "Daoíz y Velarde", "SALA MUSCULACION", "multitrabajo",
-                                  slot, mode, None, dry_run)
+                                  slot, mode, None)
+    if dry_run:  # programaciones antiguas del modo prueba, que ya no existe
+        conn.execute("UPDATE jobs SET dry_run = 1 WHERE id = ?", (job_id,))
     if status != "pendiente":
         jobs_repo.set_status(conn, job_id, status)
     conn.commit()
@@ -90,18 +92,6 @@ def test_delete_keeps_watches_created_from_it_and_other_profiles(settings):
     conn.close()
 
 
-def test_delete_all_tests_only_touches_finished_tests(settings):
-    add(settings, 5, status="prueba_ok", dry_run=True)
-    add(settings, -5, status="fallido", dry_run=True)
-    running = add(settings, 5, status="esperando_apertura", dry_run=True)
-    real = add(settings, 5, status="reservado")
-    conn = connect(settings.data_dir)
-    assert jobs_repo.delete_tests(conn, 1) == 2
-    conn.commit()
-    assert {j.id for j in jobs_repo.list_jobs(conn, 1)} == {running, real}
-    conn.close()
-
-
 @pytest.fixture
 def client(settings):
     c = TestClient(create_app(settings), follow_redirects=False)
@@ -128,18 +118,15 @@ def test_filters_and_counts(settings, client):
     assert client.get("/reservas?filtro=inventado").status_code == 200  # vuelve al de por defecto
 
 
-def test_delete_buttons_and_bulk_delete(settings, client):
-    test_id = add(settings, 5, status="prueba_ok", dry_run=True)
+def test_delete_buttons(settings, client):
+    failed_id = add(settings, 5, status="fallido")
     real_id = add(settings, 5, status="reservado")
 
     page = client.get("/reservas?filtro=todas").text
-    assert f"/reservas/{test_id}/eliminar" in page
+    assert f"/reservas/{failed_id}/eliminar" in page
     assert f"/reservas/{real_id}/eliminar" not in page
-
-    assert "Eliminar todas las pruebas (1)" in client.get("/reservas?filtro=pruebas").text
-    r = client.post("/reservas/eliminar-pruebas?filtro=pruebas")
-    assert r.headers["location"] == "/reservas?filtro=pruebas"
-    assert "1 prueba(s) eliminada(s)." in client.get("/reservas?filtro=pruebas").text
+    assert "prueba" not in page.lower()  # el modo prueba ya no existe
+    assert "filtro=pruebas" not in page
 
     # Una reserva conseguida no se deja borrar ni forzando la petición
     client.post(f"/reservas/{real_id}/eliminar")

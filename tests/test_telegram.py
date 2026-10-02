@@ -127,5 +127,5 @@ def test_account_page_without_token(tmp_path):
     s = Settings(_env_file=None, data_dir=tmp_path, fernet_key=Fernet.generate_key().decode())
     client = TestClient(create_app(s), follow_redirects=False)
     client.post("/configurar", data={"password": "casa-segura-123", "password2": "casa-segura-123"})
-    client.post("/perfiles/nuevo", data={"display_name": "A", "color": "#0f766e", "portal_username": "a", "portal_password": "b"})
+    client.post("/perfiles/nuevo", data={"display_name": "A", "color": "#0f766e", "portal_username": "a@example.com", "portal_password": "b"})
     assert "Falta <code>TELEGRAM_BOT_TOKEN</code>" in client.get("/perfil").text
